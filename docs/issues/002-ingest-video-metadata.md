@@ -6,14 +6,14 @@ A user pastes a YouTube URL into the Add Video page and gets back a Video Detail
 
 ## Acceptance criteria
 
-- [ ] `POST /api/videos/ingest` accepts a YouTube URL, extracts the video ID, fetches metadata from the YouTube Data API, upserts the video into SQLite, and returns `{ jobId, status: "queued" }`
-- [ ] Standard watch URLs (`youtube.com/watch?v=`), short URLs (`youtu.be/`), and embed URLs are all parsed correctly
-- [ ] `GET /api/videos/:youtubeVideoId` returns the stored video (title, description, channel, publishedAt, duration, thumbnailUrl, transcript\_status, summary\_status)
-- [ ] Add Video page accepts a URL, submits it, and navigates to the Video Detail page on success
-- [ ] Video Detail page displays title, channel name, published date, duration, thumbnail, and an embedded YouTube player
-- [ ] Duplicate video URLs are handled gracefully (upsert, no error shown to user)
-- [ ] Invalid or non-YouTube URLs show a validation error on the Add Video page
-- [ ] Unit tests cover URL parsing for all supported formats and invalid inputs
+- [x] `POST /api/videos/ingest` accepts a YouTube URL, extracts the video ID, fetches metadata from the YouTube Data API, upserts the video into SQLite, and returns `{ jobId, status: "queued" }`
+- [x] Standard watch URLs (`youtube.com/watch?v=`), short URLs (`youtu.be/`), and embed URLs are all parsed correctly
+- [x] `GET /api/videos/:youtubeVideoId` returns the stored video (title, description, channel, publishedAt, duration, thumbnailUrl, transcript\_status, summary\_status)
+- [x] Add Video page accepts a URL, submits it, and navigates to the Video Detail page on success
+- [x] Video Detail page displays title, channel name, published date, duration, thumbnail, and an embedded YouTube player
+- [x] Duplicate video URLs are handled gracefully (upsert, no error shown to user)
+- [x] Invalid or non-YouTube URLs show a validation error on the Add Video page
+- [x] Unit tests cover URL parsing for all supported formats and invalid inputs
 
 ## Blocked by
 

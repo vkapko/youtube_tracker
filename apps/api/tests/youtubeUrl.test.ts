@@ -28,6 +28,14 @@ describe('parseYouTubeVideoId', () => {
     expect(parseYouTubeVideoId('https://vimeo.com/123456789')).toBeNull()
   })
 
+  it('returns null for deceptive host with v= param', () => {
+    expect(parseYouTubeVideoId(`https://example.com/?v=${ID}`)).toBeNull()
+  })
+
+  it('returns null for deceptive host with embed path', () => {
+    expect(parseYouTubeVideoId(`https://notyoutube.com/embed/${ID}`)).toBeNull()
+  })
+
   it('returns null for empty string', () => {
     expect(parseYouTubeVideoId('')).toBeNull()
   })

@@ -23,42 +23,51 @@ router.post('/ingest', async (req: Request, res: Response) => {
     const meta = await fetchVideoMetadata(videoId)
     const db = getDb()
 
-    const channelResult = db.prepare(`
-      INSERT INTO channels (youtube_channel_id, name)
-      VALUES (?, ?)
-      ON CONFLICT(youtube_channel_id) DO UPDATE SET name = excluded.name
-    `).run(meta.channelId, meta.channelTitle)
+    const result = db.transaction(() => {
+      const channelRow = db.prepare(`
+        INSERT INTO channels (youtube_channel_id, name)
+        VALUES (?, ?)
+        ON CONFLICT(youtube_channel_id) DO UPDATE SET name = excluded.name
+        RETURNING id
+      `).get(meta.channelId, meta.channelTitle) as { id: number }
 
-    const channelRowId = Number(channelResult.lastInsertRowid)
+      db.prepare(`
+        INSERT INTO videos
+          (youtube_video_id, channel_id, title, description, duration_seconds, published_at, thumbnail_url, has_captions, transcript_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(youtube_video_id) DO UPDATE SET
+          channel_id        = excluded.channel_id,
+          title             = excluded.title,
+          description       = excluded.description,
+          duration_seconds  = excluded.duration_seconds,
+          published_at      = excluded.published_at,
+          thumbnail_url     = excluded.thumbnail_url,
+          has_captions      = excluded.has_captions,
+          transcript_status = excluded.transcript_status
+      `).run(
+        meta.youtubeVideoId,
+        channelRow.id,
+        meta.title,
+        meta.description,
+        meta.durationSeconds,
+        meta.publishedAt,
+        meta.thumbnailUrl,
+        meta.hasCaptions ? 1 : 0,
+        meta.hasCaptions ? 'pending' : 'unavailable',
+      )
 
-    db.prepare(`
-      INSERT INTO videos
-        (youtube_video_id, channel_id, title, description, duration_seconds, published_at, thumbnail_url, has_captions)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(youtube_video_id) DO UPDATE SET
-        channel_id       = excluded.channel_id,
-        title            = excluded.title,
-        description      = excluded.description,
-        duration_seconds = excluded.duration_seconds,
-        published_at     = excluded.published_at,
-        thumbnail_url    = excluded.thumbnail_url,
-        has_captions     = excluded.has_captions
-    `).run(
-      meta.youtubeVideoId,
-      channelRowId,
-      meta.title,
-      meta.description,
-      meta.durationSeconds,
-      meta.publishedAt,
-      meta.thumbnailUrl,
-      meta.hasCaptions ? 1 : 0,
-    )
+      if (!meta.hasCaptions) {
+        return { jobId: null, status: 'no_captions' }
+      }
 
-    const job = db
-      .prepare(`INSERT INTO ingestion_jobs (type, status, payload) VALUES ('ingest_video', 'queued', ?)`)
-      .run(JSON.stringify({ youtubeVideoId: videoId }))
+      const job = db
+        .prepare(`INSERT INTO ingestion_jobs (type, status, payload) VALUES ('ingest_video', 'queued', ?)`)
+        .run(JSON.stringify({ youtubeVideoId: videoId }))
 
-    res.status(202).json({ jobId: Number(job.lastInsertRowid), status: 'queued', youtubeVideoId: videoId })
+      return { jobId: Number(job.lastInsertRowid), status: 'queued' }
+    })()
+
+    res.status(202).json({ ...result, youtubeVideoId: videoId })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Ingestion failed'
     res.status(502).json({ error: message })
