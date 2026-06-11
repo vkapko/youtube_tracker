@@ -1,0 +1,1178 @@
+Below is a practical local-first design for your YouTube channel content tracker.
+
+Important correction: the **official YouTube Data API does not generally let you download transcripts for arbitrary public videos**. `captions.list` can list caption tracks, but `captions.download` requires permission to edit the video, so it works mainly for your own videos or videos where your OAuth account has edit access. ([Google for Developers][1])
+For public videos, you need one of these strategies:
+
+1. Use YouTube Data API for **video/channel metadata**.
+2. Use a community transcript extractor library, with ToS/rate-limit awareness.
+3. Allow manual transcript upload/paste as a fallback.
+4. Use a local browser-assisted extractor only for your own/private workflow.
+
+For the app design, I’ll assume:
+
+* YouTube Data API for metadata.
+* Transcript extractor module abstracted behind `TranscriptProvider`.
+* SQLite for metadata/state.
+* `.txt` files for raw transcripts.
+* Chroma DB for semantic search.
+* Claude SDK for summaries and chat answers.
+* React frontend, Node.js/Express backend.
+* Single local user, no authentication.
+
+---
+
+# 1. High-level architecture
+
+```text
+React UI
+  |
+  | HTTP / SSE
+  v
+Node.js Backend
+  |
+  +-- SQLite
+  |     - channels
+  |     - videos
+  |     - transcript_chunks
+  |     - summaries
+  |     - ingestion_jobs
+  |
+  +-- Local File System
+  |     - transcripts/{channelId}/{videoId}.txt
+  |     - summaries/{videoId}.md
+  |
+  +-- Chroma DB
+  |     - video transcript chunks
+  |     - embeddings
+  |     - metadata filters
+  |
+  +-- YouTube Data API
+  |     - video metadata
+  |     - channel metadata
+  |     - playlist/channel uploads
+  |
+  +-- Transcript Provider
+  |     - official caption download only if allowed
+  |     - fallback transcript extractor/manual input
+  |
+  +-- Claude SDK
+        - video summarization
+        - topic extraction
+        - chat with retrieved chunks
+```
+
+Chroma can be run locally in persistent or server mode. Chroma’s docs note that in-memory usage loses data after termination, so for this app you want either a persistent local Chroma instance or a local Chroma server with a mounted data directory. ([Chroma Docs][2])
+
+---
+
+# 2. Main user flows
+
+## Flow A — Add video by URL
+
+```text
+User pastes YouTube URL
+  ↓
+Backend extracts videoId
+  ↓
+Fetch video metadata from YouTube API
+  ↓
+Get transcript
+  ↓
+Save transcript as .txt
+  ↓
+Chunk transcript
+  ↓
+Generate embeddings
+  ↓
+Store chunks in Chroma
+  ↓
+Store metadata in SQLite
+  ↓
+Generate Claude summary
+  ↓
+Show video page
+```
+
+## Flow B — Add channel to track
+
+```text
+User pastes channel URL / handle
+  ↓
+Resolve channelId
+  ↓
+Store channel in SQLite
+  ↓
+Fetch recent videos
+  ↓
+For each unseen video:
+    ingest metadata
+    optionally ingest transcript
+    summarize
+    index in Chroma
+```
+
+## Flow C — Semantic search
+
+```text
+User enters query
+  ↓
+Backend embeds query / Chroma query
+  ↓
+Retrieve top-k transcript chunks
+  ↓
+Return matching videos + timestamps/snippets
+```
+
+## Flow D — Chat with data
+
+```text
+User asks question
+  ↓
+Retrieve relevant chunks from Chroma
+  ↓
+Build grounded prompt
+  ↓
+Claude generates answer with citations to videos/chunks
+  ↓
+Frontend displays answer + source links
+```
+
+---
+
+# 3. Recommended project structure
+
+```text
+youtube-content-tracker/
+  apps/
+    web/
+      src/
+        App.tsx
+        pages/
+          Dashboard.tsx
+          AddVideo.tsx
+          Channels.tsx
+          VideoDetail.tsx
+          Search.tsx
+          Chat.tsx
+        components/
+          VideoCard.tsx
+          SearchResults.tsx
+          ChatMessage.tsx
+          IngestionStatus.tsx
+
+    api/
+      src/
+        server.ts
+        config.ts
+
+        routes/
+          videos.routes.ts
+          channels.routes.ts
+          search.routes.ts
+          chat.routes.ts
+          jobs.routes.ts
+
+        services/
+          youtube.service.ts
+          transcript.service.ts
+          ingestion.service.ts
+          chunking.service.ts
+          chroma.service.ts
+          claude.service.ts
+          summary.service.ts
+          filesystem.service.ts
+
+        db/
+          sqlite.ts
+          schema.sql
+          repositories/
+            videos.repo.ts
+            channels.repo.ts
+            chunks.repo.ts
+            summaries.repo.ts
+            jobs.repo.ts
+
+        types/
+          youtube.ts
+          transcript.ts
+          ingestion.ts
+          search.ts
+
+  data/
+    app.sqlite
+    transcripts/
+      UC_channel_id/
+        VIDEO_ID.txt
+    summaries/
+      VIDEO_ID.md
+    chroma/
+
+  docker-compose.yml
+  package.json
+  .env
+```
+
+Use TypeScript even though you said Node.js/React.js. It is still Node + React, but it gives you safer interfaces for ingestion jobs, chunk metadata, and Claude response handling.
+
+---
+
+# 4. SQLite schema
+
+## `channels`
+
+```sql
+CREATE TABLE channels (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  youtube_channel_id TEXT UNIQUE NOT NULL,
+  title TEXT,
+  handle TEXT,
+  url TEXT,
+  description TEXT,
+  thumbnail_url TEXT,
+  last_checked_at TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+## `videos`
+
+```sql
+CREATE TABLE videos (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  youtube_video_id TEXT UNIQUE NOT NULL,
+  channel_id INTEGER,
+  title TEXT NOT NULL,
+  description TEXT,
+  url TEXT NOT NULL,
+  thumbnail_url TEXT,
+  published_at TEXT,
+  duration_seconds INTEGER,
+  has_captions INTEGER DEFAULT 0,
+
+  transcript_status TEXT DEFAULT 'pending',
+  -- pending | available | unavailable | failed | manual_required
+
+  transcript_file_path TEXT,
+  summary_status TEXT DEFAULT 'pending',
+  summary_file_path TEXT,
+
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY(channel_id) REFERENCES channels(id)
+);
+```
+
+## `transcript_chunks`
+
+```sql
+CREATE TABLE transcript_chunks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  video_id INTEGER NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  start_seconds REAL,
+  end_seconds REAL,
+  text TEXT NOT NULL,
+  token_count INTEGER,
+  chroma_document_id TEXT UNIQUE NOT NULL,
+
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY(video_id) REFERENCES videos(id)
+);
+```
+
+## `summaries`
+
+```sql
+CREATE TABLE summaries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  video_id INTEGER NOT NULL,
+  summary_type TEXT NOT NULL,
+  -- short | detailed | bullet | topics | action_items
+
+  content TEXT NOT NULL,
+  model TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+
+  FOREIGN KEY(video_id) REFERENCES videos(id)
+);
+```
+
+## `ingestion_jobs`
+
+```sql
+CREATE TABLE ingestion_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_type TEXT NOT NULL,
+  -- video | channel_sync | reindex
+
+  status TEXT NOT NULL,
+  -- queued | running | completed | failed
+
+  input_json TEXT NOT NULL,
+  error_message TEXT,
+  created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+  started_at TEXT,
+  completed_at TEXT
+);
+```
+
+---
+
+# 5. Transcript storage layout
+
+Store transcripts as plain text, but keep timestamp metadata separately when available.
+
+```text
+data/
+  transcripts/
+    UC_xxx_channel_id/
+      dQw4w9WgXcQ.txt
+      abc123.txt
+```
+
+Example transcript file:
+
+```text
+Title: Example Video
+Channel: Example Channel
+Video ID: abc123
+URL: https://www.youtube.com/watch?v=abc123
+Published: 2026-06-01
+
+[00:00:00] Introduction...
+[00:00:18] Main idea...
+[00:01:42] Technical explanation...
+```
+
+This makes the file readable by humans and still easy to parse.
+
+---
+
+# 6. Chroma collection design
+
+Use one collection:
+
+```text
+youtube_transcript_chunks
+```
+
+Each Chroma document should represent one transcript chunk.
+
+## Chroma document
+
+```ts
+{
+  id: "videoId:chunkIndex",
+  document: "Chunk text here...",
+  metadata: {
+    videoId: "abc123",
+    channelId: "UCxxxx",
+    title: "Video title",
+    channelTitle: "Channel title",
+    publishedAt: "2026-06-01T12:00:00Z",
+    startSeconds: 120,
+    endSeconds: 180,
+    transcriptFilePath: "data/transcripts/UCxxxx/abc123.txt"
+  }
+}
+```
+
+This allows:
+
+* Search across all videos.
+* Filter by channel.
+* Filter by date.
+* Retrieve source video and timestamp.
+* Rebuild Chroma from SQLite/files if needed.
+
+---
+
+# 7. API design
+
+## Video ingestion
+
+```http
+POST /api/videos/ingest
+Content-Type: application/json
+
+{
+  "url": "https://www.youtube.com/watch?v=abc123"
+}
+```
+
+Response:
+
+```json
+{
+  "jobId": 42,
+  "status": "queued"
+}
+```
+
+## Channel tracking
+
+```http
+POST /api/channels
+Content-Type: application/json
+
+{
+  "url": "https://www.youtube.com/@somechannel"
+}
+```
+
+## Sync channel
+
+```http
+POST /api/channels/:id/sync
+```
+
+## Semantic search
+
+```http
+POST /api/search
+Content-Type: application/json
+
+{
+  "query": "agentic RAG evaluation techniques",
+  "channelIds": ["UCxxx"],
+  "fromDate": "2026-01-01",
+  "toDate": "2026-06-11",
+  "topK": 10
+}
+```
+
+## Chat
+
+```http
+POST /api/chat
+Content-Type: application/json
+
+{
+  "question": "What do these channels say about LangGraph agent orchestration?",
+  "channelIds": ["UCxxx"],
+  "topK": 12
+}
+```
+
+## Video detail
+
+```http
+GET /api/videos/:youtubeVideoId
+```
+
+---
+
+# 8. Backend service responsibilities
+
+## `youtube.service.ts`
+
+Responsibilities:
+
+* Parse YouTube URL.
+* Fetch video metadata.
+* Fetch channel metadata.
+* Resolve channel handles.
+* Fetch recent channel uploads.
+
+YouTube Data API can return video metadata including `contentDetails`, and the `contentDetails` object includes information such as video length and whether captions are available. ([Google for Developers][3])
+
+```ts
+export interface YouTubeVideoMetadata {
+  videoId: string;
+  channelId: string;
+  channelTitle: string;
+  title: string;
+  description: string;
+  publishedAt: string;
+  durationSeconds: number;
+  thumbnailUrl?: string;
+  hasCaptions?: boolean;
+}
+```
+
+## `transcript.service.ts`
+
+Responsibilities:
+
+* Try official caption path when possible.
+* Fallback to community extractor/manual import.
+* Normalize transcript to plain text.
+* Preserve timestamps when available.
+
+```ts
+export interface TranscriptSegment {
+  startSeconds?: number;
+  endSeconds?: number;
+  text: string;
+}
+
+export interface TranscriptResult {
+  videoId: string;
+  language?: string;
+  source: "youtube_api" | "extractor" | "manual";
+  segments: TranscriptSegment[];
+  plainText: string;
+}
+```
+
+Important design point: make transcript acquisition pluggable.
+
+```ts
+export interface TranscriptProvider {
+  getTranscript(videoId: string): Promise<TranscriptResult>;
+}
+```
+
+Then implement:
+
+```text
+OfficialYouTubeCaptionProvider
+CommunityTranscriptProvider
+ManualTranscriptProvider
+```
+
+This keeps your app stable if one extraction strategy fails.
+
+---
+
+# 9. Ingestion pipeline
+
+Use a background job queue even for a local app. You can start simple with an in-process queue.
+
+```ts
+async function ingestVideo(url: string) {
+  const videoId = parseYouTubeVideoId(url);
+
+  const metadata = await youtubeService.getVideoMetadata(videoId);
+
+  const video = await videosRepo.upsert(metadata);
+
+  const transcript = await transcriptService.getTranscript(videoId);
+
+  const transcriptPath = await filesystemService.saveTranscript({
+    channelId: metadata.channelId,
+    videoId,
+    content: transcript.plainText,
+  });
+
+  await videosRepo.markTranscriptAvailable(video.id, transcriptPath);
+
+  const chunks = chunkTranscript(transcript.segments, {
+    maxTokens: 500,
+    overlapTokens: 75,
+  });
+
+  await chunksRepo.insertChunks(video.id, chunks);
+
+  await chromaService.indexChunks({
+    video,
+    chunks,
+  });
+
+  const summary = await summaryService.summarizeVideo({
+    metadata,
+    transcript: transcript.plainText,
+  });
+
+  await summaryService.saveSummary(video.id, summary);
+}
+```
+
+---
+
+# 10. Chunking strategy
+
+For transcript search, chunking quality matters more than model choice.
+
+Recommended starting point:
+
+```text
+chunk size: 400–700 tokens
+overlap: 50–100 tokens
+split priority:
+  1. timestamp segment boundaries
+  2. paragraph boundaries
+  3. sentence boundaries
+  4. hard token limit
+```
+
+Why not huge chunks?
+
+* Retrieval becomes less precise.
+* Claude gets more irrelevant context.
+* Semantic search returns broad matches instead of exact moments.
+
+Why not tiny chunks?
+
+* Context loses meaning.
+* More Chroma documents.
+* More noisy retrieval.
+
+A good chunk shape:
+
+```ts
+export interface TranscriptChunk {
+  chunkIndex: number;
+  text: string;
+  startSeconds?: number;
+  endSeconds?: number;
+  tokenCount: number;
+}
+```
+
+---
+
+# 11. Claude summarization design
+
+Anthropic provides official SDKs, and the Claude Messages API expects you to construct turns and manage conversation state yourself. ([Claude API Docs][4])
+
+Use Claude for:
+
+1. Short summary.
+2. Detailed summary.
+3. Key topics.
+4. Action items.
+5. Technical concepts.
+6. “Why this video matters” note.
+
+Example summary prompt:
+
+```ts
+const prompt = `
+You are summarizing a YouTube transcript for a local personal knowledge base.
+
+Return JSON with:
+{
+  "shortSummary": string,
+  "detailedSummary": string[],
+  "keyTopics": string[],
+  "technicalTerms": string[],
+  "actionItems": string[],
+  "notableQuotes": string[]
+}
+
+Video title: ${metadata.title}
+Channel: ${metadata.channelTitle}
+Published: ${metadata.publishedAt}
+
+Transcript:
+${transcript}
+`;
+```
+
+For long transcripts, do map-reduce summarization:
+
+```text
+Split transcript into large sections
+  ↓
+Summarize each section
+  ↓
+Summarize summaries into final structured summary
+```
+
+Do not send a 2-hour transcript directly unless it fits the model context and budget.
+
+---
+
+# 12. Chat/RAG design
+
+## Retrieval
+
+```ts
+async function retrieveContext(question: string, filters: SearchFilters) {
+  return chromaService.query({
+    queryTexts: [question],
+    nResults: 12,
+    where: buildChromaWhere(filters),
+  });
+}
+```
+
+## Prompt construction
+
+```ts
+const systemPrompt = `
+You answer questions using only the provided YouTube transcript excerpts.
+
+Rules:
+- Use the excerpts as the source of truth.
+- If the answer is not in the excerpts, say that the local video database does not contain enough information.
+- Cite video title and timestamp when possible.
+- Do not invent video content.
+`;
+
+const userPrompt = `
+Question:
+${question}
+
+Transcript excerpts:
+${contexts.map(formatContext).join("\n\n")}
+`;
+```
+
+## Answer output schema
+
+Ask Claude for structured output:
+
+```json
+{
+  "answer": "...",
+  "sources": [
+    {
+      "videoId": "abc123",
+      "title": "Video title",
+      "timestamp": "00:12:30",
+      "reason": "This excerpt discusses..."
+    }
+  ],
+  "confidence": "high | medium | low",
+  "missingInformation": []
+}
+```
+
+This makes the UI much easier to build.
+
+---
+
+# 13. React UI pages
+
+## Dashboard
+
+Show:
+
+* Total tracked channels.
+* Total indexed videos.
+* Videos without transcripts.
+* Recently ingested videos.
+* Recent summaries.
+* Failed ingestion jobs.
+
+## Add Video
+
+Fields:
+
+* YouTube URL input.
+* “Ingest video” button.
+* Job status.
+* Transcript status.
+* Summary preview.
+
+## Channels
+
+Show:
+
+* Channel title.
+* Last checked time.
+* Number of videos indexed.
+* Number of failed transcript fetches.
+* “Sync now” button.
+
+## Video Detail
+
+Show:
+
+* Embedded YouTube player.
+* Metadata.
+* Summary.
+* Transcript viewer.
+* Search within transcript.
+* Reindex button.
+* Regenerate summary button.
+
+## Search
+
+Show:
+
+* Query box.
+* Channel/date filters.
+* Results grouped by video.
+* Snippets with timestamps.
+* Link to YouTube timestamp.
+
+## Chat
+
+Show:
+
+* Chat interface.
+* Source cards under each answer.
+* “Open video at timestamp.”
+* “Show retrieved transcript chunks.”
+
+---
+
+# 14. Local filesystem persistence
+
+Use SQLite as the source of truth for metadata and file paths.
+
+Example:
+
+```text
+data/
+  app.sqlite
+  transcripts/
+    UC123/
+      abc123.txt
+  summaries/
+    abc123.short.md
+    abc123.detailed.md
+  chroma/
+```
+
+Store transcript text in files because:
+
+* Easy to inspect manually.
+* Easy to back up.
+* Avoids bloating SQLite.
+* Allows reindexing Chroma from disk.
+
+Store chunk text in SQLite too because:
+
+* Easier debugging.
+* Easier source attribution.
+* Easier Chroma rebuild.
+
+---
+
+# 15. Chroma lifecycle
+
+You need a way to rebuild Chroma from SQLite/files.
+
+Add command:
+
+```bash
+npm run reindex
+```
+
+Reindex flow:
+
+```text
+Delete Chroma collection
+  ↓
+Read all videos with transcript_status = available
+  ↓
+Read chunks from SQLite
+  ↓
+Insert chunks into Chroma
+```
+
+This is important because vector stores can get out of sync during local development.
+
+---
+
+# 16. Suggested dependencies
+
+Backend:
+
+```bash
+npm install express cors dotenv better-sqlite3 zod
+npm install googleapis
+npm install @anthropic-ai/sdk
+npm install chromadb
+npm install p-queue
+npm install nanoid
+npm install date-fns
+```
+
+Dev:
+
+```bash
+npm install -D typescript tsx nodemon vitest @types/express
+```
+
+Frontend:
+
+```bash
+npm create vite@latest web -- --template react-ts
+npm install axios @tanstack/react-query react-router-dom
+```
+
+For transcript extraction, keep this abstracted. Depending on your chosen approach, you may add a community package, but I would not hardwire the architecture to a single unofficial extractor.
+
+---
+
+# 17. Environment variables
+
+```env
+PORT=4000
+
+DATABASE_PATH=./data/app.sqlite
+DATA_DIR=./data
+
+YOUTUBE_API_KEY=...
+ANTHROPIC_API_KEY=...
+
+CHROMA_URL=http://localhost:8000
+CHROMA_COLLECTION=youtube_transcript_chunks
+
+CLAUDE_SUMMARY_MODEL=claude-sonnet-4-5
+CLAUDE_CHAT_MODEL=claude-sonnet-4-5
+```
+
+Model names change over time, so keep them configurable instead of hardcoding them.
+
+---
+
+# 18. Docker Compose for Chroma
+
+A simple local pattern:
+
+```yaml
+services:
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data/chroma:/chroma/chroma
+```
+
+Then your Node backend connects to `http://localhost:8000`.
+
+---
+
+# 19. Minimal backend route example
+
+```ts
+import express from "express";
+import { z } from "zod";
+import { ingestionService } from "../services/ingestion.service";
+
+const router = express.Router();
+
+const ingestVideoSchema = z.object({
+  url: z.string().url(),
+});
+
+router.post("/ingest", async (req, res, next) => {
+  try {
+    const input = ingestVideoSchema.parse(req.body);
+
+    const job = await ingestionService.enqueueVideoIngestion(input.url);
+
+    res.json({
+      jobId: job.id,
+      status: job.status,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+export default router;
+```
+
+---
+
+# 20. Minimal Claude service example
+
+```ts
+import Anthropic from "@anthropic-ai/sdk";
+
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY,
+});
+
+export async function generateAnswer({
+  question,
+  contexts,
+}: {
+  question: string;
+  contexts: string[];
+}) {
+  const response = await anthropic.messages.create({
+    model: process.env.CLAUDE_CHAT_MODEL!,
+    max_tokens: 1200,
+    system: `
+You answer using only the provided transcript excerpts.
+If the excerpts do not contain enough information, say so.
+Cite the relevant video title and timestamp when available.
+    `,
+    messages: [
+      {
+        role: "user",
+        content: `
+Question:
+${question}
+
+Transcript excerpts:
+${contexts.join("\n\n---\n\n")}
+        `,
+      },
+    ],
+  });
+
+  return response.content;
+}
+```
+
+---
+
+# 21. Search result ranking
+
+Start with Chroma similarity ranking, then improve with lightweight reranking.
+
+Basic ranking:
+
+```text
+score = vector_similarity
+```
+
+Better ranking:
+
+```text
+score =
+  0.65 * vector_similarity
++ 0.15 * title_match
++ 0.10 * recency_boost
++ 0.10 * channel_priority
+```
+
+For example:
+
+```ts
+function applyBusinessRanking(result: SearchResult, query: string) {
+  let score = result.similarity;
+
+  if (result.title.toLowerCase().includes(query.toLowerCase())) {
+    score += 0.15;
+  }
+
+  if (isRecent(result.publishedAt, 90)) {
+    score += 0.05;
+  }
+
+  return score;
+}
+```
+
+---
+
+# 22. Handling failed transcripts
+
+You should expect many failures.
+
+Possible statuses:
+
+```text
+pending
+available
+unavailable
+manual_required
+failed
+```
+
+For videos without transcripts, still store metadata. Then the UI can show:
+
+```text
+Transcript unavailable.
+Options:
+- Retry
+- Paste transcript manually
+- Upload .txt file
+- Keep metadata only
+```
+
+Manual transcript import is important because it keeps the app useful even when transcript extraction fails.
+
+---
+
+# 23. Recommended MVP scope
+
+Build in this order:
+
+## Phase 1 — Local ingestion
+
+* Paste video URL.
+* Fetch metadata.
+* Fetch or manually add transcript.
+* Save `.txt`.
+* Store video in SQLite.
+* Show video detail page.
+
+## Phase 2 — Indexing
+
+* Chunk transcript.
+* Store chunks in SQLite.
+* Index chunks in Chroma.
+* Implement semantic search.
+
+## Phase 3 — Claude summaries
+
+* Generate short summary.
+* Generate topics.
+* Generate action items.
+* Save summaries.
+
+## Phase 4 — Chat
+
+* Retrieve top-k chunks.
+* Ask Claude.
+* Return answer with sources.
+
+## Phase 5 — Channel tracking
+
+* Add channel.
+* Fetch recent videos.
+* Sync new videos.
+* Show channel dashboard.
+
+---
+
+# 24. Key technical risks
+
+| Risk                 | Why it matters                                                | Mitigation                                           |
+| -------------------- | ------------------------------------------------------------- | ---------------------------------------------------- |
+| Transcript access    | Official YouTube API does not freely download public captions | Abstract `TranscriptProvider`; support manual import |
+| Chroma/SQLite drift  | Local dev can desync vector index and metadata                | Add full reindex command                             |
+| Long transcripts     | Claude context/cost limits                                    | Map-reduce summarization                             |
+| Hallucinated answers | RAG answers may overgeneralize                                | Force citations and “not enough info” behavior       |
+| Duplicate videos     | Same URL formats produce same video                           | Normalize `videoId` and use unique constraint        |
+| Rate limits          | YouTube API quota can be consumed quickly                     | Cache metadata, sync incrementally                   |
+| Bad chunking         | Search quality suffers                                        | Timestamp-aware chunks with overlap                  |
+
+---
+
+# 25. Final target architecture
+
+```text
+                 ┌────────────────────┐
+                 │     React App       │
+                 │ Dashboard/Search/Chat│
+                 └─────────┬──────────┘
+                           │
+                           ▼
+                 ┌────────────────────┐
+                 │  Node.js API        │
+                 │ Express + TS        │
+                 └─────────┬──────────┘
+                           │
+        ┌──────────────────┼──────────────────┐
+        ▼                  ▼                  ▼
+┌──────────────┐   ┌────────────────┐   ┌──────────────┐
+│ YouTube API  │   │ Transcript     │   │ Claude SDK   │
+│ Metadata     │   │ Provider       │   │ Summary/Chat │
+└──────────────┘   └────────────────┘   └──────────────┘
+        │                  │                  │
+        └──────────────────┼──────────────────┘
+                           ▼
+                 ┌────────────────────┐
+                 │ Ingestion Pipeline  │
+                 └─────────┬──────────┘
+                           │
+          ┌────────────────┼────────────────┐
+          ▼                ▼                ▼
+ ┌────────────────┐ ┌──────────────┐ ┌──────────────┐
+ │ SQLite Metadata│ │ Transcript   │ │ Chroma DB    │
+ │ Videos/Chunks  │ │ .txt Files   │ │ Embeddings   │
+ └────────────────┘ └──────────────┘ └──────────────┘
+```
+
+This design gives you a clean local knowledge base for YouTube content, with human-readable transcript files, reliable metadata in SQLite, semantic retrieval in Chroma, and Claude-powered summarization/chat on top.
+
+[1]: https://developers.google.com/youtube/v3/docs/captions/list?utm_source=chatgpt.com "Captions: list | YouTube Data API"
+[2]: https://docs.trychroma.com/docs/overview/getting-started?utm_source=chatgpt.com "Getting Started - Chroma Docs"
+[3]: https://developers.google.com/youtube/v3/docs/videos?utm_source=chatgpt.com "Videos | YouTube Data API"
+[4]: https://docs.anthropic.com/en/api/client-sdks?utm_source=chatgpt.com "Client SDKs - Claude API Docs"
