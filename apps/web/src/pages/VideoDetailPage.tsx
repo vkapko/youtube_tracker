@@ -4,6 +4,7 @@ import { useParams, Link } from 'react-router-dom'
 interface Video {
   youtube_video_id: string
   title: string
+  channel_name: string | null
   description: string
   duration_seconds: number
   published_at: string
@@ -50,9 +51,17 @@ export default function VideoDetailPage() {
       <Link to="/" style={{ fontSize: '0.9rem' }}>← Add another video</Link>
       <h1 style={{ marginTop: '0.5rem' }}>{video.title}</h1>
       <div style={{ display: 'flex', gap: '1.5rem', color: '#666', marginBottom: '1rem' }}>
+        {video.channel_name && <span>{video.channel_name}</span>}
         <span>Published: {new Date(video.published_at).toLocaleDateString()}</span>
         <span>Duration: {formatDuration(video.duration_seconds)}</span>
       </div>
+      {video.thumbnail_url && (
+        <img
+          src={video.thumbnail_url}
+          alt={video.title}
+          style={{ width: '100%', display: 'block', marginBottom: '1rem', borderRadius: 4 }}
+        />
+      )}
       <iframe
         width="100%"
         style={{ aspectRatio: '16/9', border: 'none', display: 'block', marginBottom: '1rem' }}

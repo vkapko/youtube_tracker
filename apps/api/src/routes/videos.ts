@@ -23,11 +23,20 @@ router.post('/ingest', async (req: Request, res: Response) => {
     const meta = await fetchVideoMetadata(videoId)
     const db = getDb()
 
+    const channelResult = db.prepare(`
+      INSERT INTO channels (youtube_channel_id, name)
+      VALUES (?, ?)
+      ON CONFLICT(youtube_channel_id) DO UPDATE SET name = excluded.name
+    `).run(meta.channelId, meta.channelTitle)
+
+    const channelRowId = Number(channelResult.lastInsertRowid)
+
     db.prepare(`
       INSERT INTO videos
-        (youtube_video_id, title, description, duration_seconds, published_at, thumbnail_url, has_captions)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+        (youtube_video_id, channel_id, title, description, duration_seconds, published_at, thumbnail_url, has_captions)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(youtube_video_id) DO UPDATE SET
+        channel_id       = excluded.channel_id,
         title            = excluded.title,
         description      = excluded.description,
         duration_seconds = excluded.duration_seconds,
@@ -36,6 +45,7 @@ router.post('/ingest', async (req: Request, res: Response) => {
         has_captions     = excluded.has_captions
     `).run(
       meta.youtubeVideoId,
+      channelRowId,
       meta.title,
       meta.description,
       meta.durationSeconds,
@@ -59,7 +69,12 @@ router.get('/:youtubeVideoId', (req: Request, res: Response) => {
   const { youtubeVideoId } = req.params
   const db = getDb()
 
-  const video = db.prepare('SELECT * FROM videos WHERE youtube_video_id = ?').get(youtubeVideoId)
+  const video = db.prepare(`
+    SELECT v.*, c.name AS channel_name
+    FROM videos v
+    LEFT JOIN channels c ON c.id = v.channel_id
+    WHERE v.youtube_video_id = ?
+  `).get(youtubeVideoId)
   if (!video) {
     res.status(404).json({ error: 'Video not found' })
     return
