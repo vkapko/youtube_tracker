@@ -1,7 +1,14 @@
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import AddVideoPage from './pages/AddVideoPage'
+import VideoDetailPage from './pages/VideoDetailPage'
+
 export default function App() {
   return (
-    <div>
-      <h1>YouTube Tracker</h1>
-    </div>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<AddVideoPage />} />
+        <Route path="/videos/:youtubeVideoId" element={<VideoDetailPage />} />
+      </Routes>
+    </BrowserRouter>
   )
 }
