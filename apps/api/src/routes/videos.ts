@@ -2,6 +2,8 @@ import { Router, Request, Response } from 'express'
 import { parseYouTubeVideoId } from '../lib/youtubeUrl'
 import { fetchVideoMetadata } from '../lib/youtubeApi'
 import { getDb } from '../db/database'
+import { YouTubeTranscriptProvider } from '../services/transcript'
+import { saveTranscript } from '../services/transcriptFile'
 
 const router = Router()
 
@@ -23,51 +25,72 @@ router.post('/ingest', async (req: Request, res: Response) => {
     const meta = await fetchVideoMetadata(videoId)
     const db = getDb()
 
-    const result = db.transaction(() => {
-      const channelRow = db.prepare(`
-        INSERT INTO channels (youtube_channel_id, name)
-        VALUES (?, ?)
-        ON CONFLICT(youtube_channel_id) DO UPDATE SET name = excluded.name
-        RETURNING id
-      `).get(meta.channelId, meta.channelTitle) as { id: number }
+    const channelRow = db.prepare(`
+      INSERT INTO channels (youtube_channel_id, name)
+      VALUES (?, ?)
+      ON CONFLICT(youtube_channel_id) DO UPDATE SET name = excluded.name
+      RETURNING id
+    `).get(meta.channelId, meta.channelTitle) as { id: number }
 
-      db.prepare(`
-        INSERT INTO videos
-          (youtube_video_id, channel_id, title, description, duration_seconds, published_at, thumbnail_url, has_captions, transcript_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(youtube_video_id) DO UPDATE SET
-          channel_id        = excluded.channel_id,
-          title             = excluded.title,
-          description       = excluded.description,
-          duration_seconds  = excluded.duration_seconds,
-          published_at      = excluded.published_at,
-          thumbnail_url     = excluded.thumbnail_url,
-          has_captions      = excluded.has_captions,
-          transcript_status = excluded.transcript_status
-      `).run(
-        meta.youtubeVideoId,
-        channelRow.id,
-        meta.title,
-        meta.description,
-        meta.durationSeconds,
-        meta.publishedAt,
-        meta.thumbnailUrl,
-        meta.hasCaptions ? 1 : 0,
-        meta.hasCaptions ? 'pending' : 'unavailable',
-      )
+    db.prepare(`
+      INSERT INTO videos
+        (youtube_video_id, channel_id, title, description, duration_seconds, published_at, thumbnail_url, has_captions, transcript_status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(youtube_video_id) DO UPDATE SET
+        channel_id        = excluded.channel_id,
+        title             = excluded.title,
+        description       = excluded.description,
+        duration_seconds  = excluded.duration_seconds,
+        published_at      = excluded.published_at,
+        thumbnail_url     = excluded.thumbnail_url,
+        has_captions      = excluded.has_captions,
+        transcript_status = CASE WHEN videos.transcript_status = 'available' THEN videos.transcript_status ELSE excluded.transcript_status END
+    `).run(
+      meta.youtubeVideoId,
+      channelRow.id,
+      meta.title,
+      meta.description,
+      meta.durationSeconds,
+      meta.publishedAt,
+      meta.thumbnailUrl,
+      meta.hasCaptions ? 1 : 0,
+      meta.hasCaptions ? 'pending' : 'unavailable',
+    )
 
-      if (!meta.hasCaptions) {
-        return { jobId: null, status: 'no_captions' }
-      }
+    if (!meta.hasCaptions) {
+      res.status(202).json({ status: 'no_captions', youtubeVideoId: videoId })
+      return
+    }
 
-      const job = db
-        .prepare(`INSERT INTO ingestion_jobs (type, status, payload) VALUES ('ingest_video', 'queued', ?)`)
-        .run(JSON.stringify({ youtubeVideoId: videoId }))
+    const existing = db.prepare(
+      'SELECT transcript_status FROM videos WHERE youtube_video_id = ?'
+    ).get(videoId) as { transcript_status: string }
+    if (existing.transcript_status === 'available') {
+      res.status(202).json({ status: 'available', youtubeVideoId: videoId })
+      return
+    }
 
-      return { jobId: Number(job.lastInsertRowid), status: 'queued' }
-    })()
-
-    res.status(202).json({ ...result, youtubeVideoId: videoId })
+    try {
+      const provider = new YouTubeTranscriptProvider()
+      const transcriptResult = await provider.getTranscript(videoId)
+      const transcriptPath = await saveTranscript({
+        channelId: meta.channelId,
+        videoId,
+        title: meta.title,
+        channelName: meta.channelTitle,
+        publishedAt: meta.publishedAt,
+        result: transcriptResult,
+      })
+      db.prepare(
+        `UPDATE videos SET transcript_status = 'available', transcript_file_path = ? WHERE youtube_video_id = ?`
+      ).run(transcriptPath, videoId)
+      res.status(202).json({ status: 'available', youtubeVideoId: videoId })
+    } catch {
+      db.prepare(
+        `UPDATE videos SET transcript_status = 'failed' WHERE youtube_video_id = ?`
+      ).run(videoId)
+      res.status(202).json({ status: 'failed', youtubeVideoId: videoId })
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Ingestion failed'
     res.status(502).json({ error: message })

@@ -4,7 +4,7 @@
 |---|-------|--------|
 | [001](docs/issues/001-project-scaffold.md) | Project scaffold | ✅ Done |
 | [002](docs/issues/002-ingest-video-metadata.md) | Ingest video by URL (metadata only) | ✅ Done |
-| [003](docs/issues/003-transcript-extraction.md) | Transcript extraction | 🔲 Todo |
+| [003](docs/issues/003-transcript-extraction.md) | Transcript extraction | ✅ Done |
 | [004](docs/issues/004-ingestion-job-queue.md) | Ingestion job queue | 🔲 Todo |
 | [005](docs/issues/005-chunking-chroma-indexing.md) | Chunking + Chroma indexing | 🔲 Todo |
 | [006](docs/issues/006-semantic-search.md) | Semantic search | 🔲 Todo |

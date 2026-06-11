@@ -24,7 +24,7 @@ export function runMigration(db: Database.Database): void {
       thumbnail_url       TEXT,
       has_captions        INTEGER,
       transcript_status   TEXT    NOT NULL DEFAULT 'pending',
-      transcript_path     TEXT,
+      transcript_file_path TEXT,
       summary_status      TEXT    NOT NULL DEFAULT 'pending',
       created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
     );
@@ -58,4 +58,12 @@ export function runMigration(db: Database.Database): void {
       updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
     );
   `)
+
+  // Rename transcript_path → transcript_file_path (databases created before #003 used the old name)
+  const cols = db.pragma('table_info(videos)') as Array<{ name: string }>
+  const hasOld = cols.some(c => c.name === 'transcript_path')
+  const hasNew = cols.some(c => c.name === 'transcript_file_path')
+  if (hasOld && !hasNew) {
+    db.exec(`ALTER TABLE videos RENAME COLUMN transcript_path TO transcript_file_path`)
+  }
 }
