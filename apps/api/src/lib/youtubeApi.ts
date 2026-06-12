@@ -58,6 +58,41 @@ export async function fetchVideoMetadata(videoId: string): Promise<VideoMetadata
   }
 }
 
+export interface ChannelVideoRef {
+  videoId: string
+  publishedAt: string
+}
+
+export async function fetchChannelRecentVideoIds(channelId: string, maxResults = 50): Promise<ChannelVideoRef[]> {
+  const apiKey = process.env.YOUTUBE_API_KEY
+  if (!apiKey) throw new Error('YOUTUBE_API_KEY is not set')
+
+  const channelRes = await fetch(
+    `https://www.googleapis.com/youtube/v3/channels?part=contentDetails&id=${channelId}&key=${apiKey}`
+  )
+  if (!channelRes.ok) throw new Error(`YouTube API responded with ${channelRes.status}`)
+
+  const channelData = await channelRes.json() as {
+    items?: Array<{ contentDetails: { relatedPlaylists: { uploads: string } } }>
+  }
+  const uploadsPlaylistId = channelData.items?.[0]?.contentDetails?.relatedPlaylists?.uploads
+  if (!uploadsPlaylistId) throw new Error(`No uploads playlist found for channel: ${channelId}`)
+
+  const playlistRes = await fetch(
+    `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=${maxResults}&key=${apiKey}`
+  )
+  if (!playlistRes.ok) throw new Error(`YouTube API responded with ${playlistRes.status}`)
+
+  const playlistData = await playlistRes.json() as {
+    items?: Array<{ snippet: { publishedAt: string; resourceId: { videoId: string } } }>
+  }
+
+  return (playlistData.items ?? []).map(item => ({
+    videoId: item.snippet.resourceId.videoId,
+    publishedAt: item.snippet.publishedAt,
+  }))
+}
+
 function parseDuration(iso: string): number {
   const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/)
   if (!m) return 0

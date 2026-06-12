@@ -52,12 +52,19 @@ export function runMigration(db: Database.Database): void {
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
       type           TEXT    NOT NULL,
       status         TEXT    NOT NULL DEFAULT 'queued',
+      stage          TEXT,
       payload        TEXT    NOT NULL,
       error_message  TEXT,
       created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
       updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
     );
   `)
+
+  // Add stage column to ingestion_jobs for databases created before this migration
+  const jobCols = db.pragma('table_info(ingestion_jobs)') as Array<{ name: string }>
+  if (!jobCols.some(c => c.name === 'stage')) {
+    db.exec(`ALTER TABLE ingestion_jobs ADD COLUMN stage TEXT`)
+  }
 
   // Rename transcript_path → transcript_file_path (databases created before #003 used the old name)
   const cols = db.pragma('table_info(videos)') as Array<{ name: string }>

@@ -25,6 +25,8 @@ import app from '../src/app'
 import { getDb } from '../src/db/database'
 import * as youtubeApi from '../src/lib/youtubeApi'
 import * as ytLib from 'youtube-transcript'
+import { jobQueue, setJobQueue, JobQueue } from '../src/services/jobQueue'
+import { createIngestVideoWorker } from '../src/services/ingestWorker'
 
 const baseMeta = {
   youtubeVideoId: 'dQw4w9WgXcQ',
@@ -43,7 +45,9 @@ describe('POST /api/videos/ingest — transcript extraction', () => {
   const mockFetchTranscript = vi.mocked(ytLib.YoutubeTranscript.fetchTranscript)
 
   beforeEach(() => {
+    setJobQueue(new JobQueue({ ingest_video: createIngestVideoWorker(0) }))
     const db = getDb()
+    db.prepare('DELETE FROM ingestion_jobs').run()
     db.prepare('DELETE FROM videos').run()
     db.prepare('DELETE FROM channels').run()
     mockFetchMeta.mockReset()
@@ -61,6 +65,7 @@ describe('POST /api/videos/ingest — transcript extraction', () => {
       .send({ url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' })
 
     expect(res.status).toBe(202)
+    await jobQueue.waitForIdle()
 
     const db = getDb()
     const row = db.prepare(
@@ -79,6 +84,7 @@ describe('POST /api/videos/ingest — transcript extraction', () => {
       .send({ url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' })
 
     expect(res.status).toBe(202)
+    await jobQueue.waitForIdle()
 
     const db = getDb()
     const row = db.prepare(
@@ -105,7 +111,8 @@ describe('POST /api/videos/ingest — transcript extraction', () => {
       .send({ url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' })
 
     expect(res.status).toBe(202)
-    expect(res.body.status).toBe('available')
+    await jobQueue.waitForIdle()
+
     expect(mockFetchTranscript).not.toHaveBeenCalled()
 
     const row = db.prepare(
@@ -123,6 +130,8 @@ describe('POST /api/videos/ingest — transcript extraction', () => {
       .send({ url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' })
 
     expect(res.status).toBe(202)
+    await jobQueue.waitForIdle()
+
     expect(mockFetchTranscript).not.toHaveBeenCalled()
 
     const db = getDb()
