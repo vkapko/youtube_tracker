@@ -6,17 +6,17 @@ A user asks a natural language question, the app retrieves the most relevant tra
 
 ## Acceptance criteria
 
-- [ ] `POST /api/chat` accepts `{ question, channelIds?, topK? }` and responds with an SSE stream
-- [ ] Chroma is queried for the top-k chunks matching the question, filtered by `channelIds` when provided
-- [ ] Claude is called with a system prompt that instructs it to answer only from the provided excerpts and to cite video title and timestamp
-- [ ] Claude's response is streamed token by token via SSE to the frontend
-- [ ] The final SSE event includes structured `sources`: `[{ videoId, title, timestamp, reason }]`
-- [ ] If the retrieved chunks do not contain enough information, Claude responds with a clear "not enough information" message rather than hallucinating
-- [ ] Chat page renders a message thread with streaming token display
-- [ ] Source cards appear below each answer showing video title, timestamp, and a deep-link to that moment
-- [ ] A channel scope selector (multi-select or "all channels") appears above the chat input; the selection persists in frontend state across messages for the session
-- [ ] Chat history is maintained in frontend state for the session (not persisted to the database)
-- [ ] The Claude model used is read from `CLAUDE_CHAT_MODEL` env var
+- [x] `POST /api/chat` accepts `{ question, channelIds?, topK? }` and responds with an SSE stream
+- [x] Chroma is queried for the top-k chunks matching the question, filtered by `channelIds` when provided
+- [x] Claude is called with a system prompt that instructs it to answer only from the provided excerpts and to cite video title and timestamp
+- [x] Claude's response is streamed token by token via SSE to the frontend
+- [x] The final SSE event includes structured `sources`: `[{ videoId, title, timestamp, reason }]`
+- [x] If the retrieved chunks do not contain enough information, Claude responds with a clear "not enough information" message rather than hallucinating
+- [x] Chat page renders a message thread with streaming token display
+- [x] Source cards appear below each answer showing video title, timestamp, and a deep-link to that moment
+- [x] A channel scope selector (multi-select or "all channels") appears above the chat input; the selection persists in frontend state across messages for the session
+- [x] Chat history is maintained in frontend state for the session (not persisted to the database)
+- [x] The Claude model used is read from `CLAUDE_CHAT_MODEL` env var
 
 ## Blocked by
 
