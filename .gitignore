@@ -6,3 +6,4 @@ dist/
 .env
 apps/api/node_modules/.vite/
 data/
+.playwright-mcp/
