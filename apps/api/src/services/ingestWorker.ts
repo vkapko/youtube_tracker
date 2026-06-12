@@ -2,7 +2,9 @@ import PQueue from 'p-queue'
 import { fetchVideoMetadata } from '../lib/youtubeApi'
 import { getDb } from '../db/database'
 import { YouTubeTranscriptProvider } from './transcript'
+import type { TranscriptResult } from './transcript'
 import { saveTranscript } from './transcriptFile'
+import { TranscriptIndexer } from './transcriptIndexing'
 import type { JobRow } from './jobQueue'
 
 // Shared across all concurrent ingest jobs — enforces at most one YouTube transcript
@@ -24,7 +26,7 @@ export function createIngestVideoWorker(transcriptFetchDelayMs = 1000) {
       RETURNING id
     `).get(meta.channelId, meta.channelTitle) as { id: number }
 
-    db.prepare(`
+    const videoRow = db.prepare(`
       INSERT INTO videos
         (youtube_video_id, channel_id, title, description, duration_seconds, published_at, thumbnail_url, has_captions, transcript_status)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -37,7 +39,8 @@ export function createIngestVideoWorker(transcriptFetchDelayMs = 1000) {
         thumbnail_url     = excluded.thumbnail_url,
         has_captions      = excluded.has_captions,
         transcript_status = CASE WHEN videos.transcript_status = 'available' THEN videos.transcript_status ELSE excluded.transcript_status END
-    `).run(
+      RETURNING id
+    `).get(
       meta.youtubeVideoId,
       channelRow.id,
       meta.title,
@@ -47,7 +50,7 @@ export function createIngestVideoWorker(transcriptFetchDelayMs = 1000) {
       meta.thumbnailUrl,
       meta.hasCaptions ? 1 : 0,
       meta.hasCaptions ? 'pending' : 'unavailable',
-    )
+    ) as { id: number }
 
     if (!meta.hasCaptions) return
 
@@ -57,14 +60,16 @@ export function createIngestVideoWorker(transcriptFetchDelayMs = 1000) {
     if (existing.transcript_status === 'available') return
 
     setStage('fetching_transcript')
+    let transcriptResult: TranscriptResult | undefined
+    let transcriptPath: string | undefined
     await transcriptRateLimiter.add(async () => {
       if (transcriptFetchDelayMs > 0) {
         await new Promise(r => setTimeout(r, transcriptFetchDelayMs))
       }
       try {
         const provider = new YouTubeTranscriptProvider()
-        const transcriptResult = await provider.getTranscript(videoId)
-        const transcriptPath = await saveTranscript({
+        transcriptResult = await provider.getTranscript(videoId)
+        transcriptPath = await saveTranscript({
           channelId: meta.channelId,
           videoId,
           title: meta.title,
@@ -72,9 +77,6 @@ export function createIngestVideoWorker(transcriptFetchDelayMs = 1000) {
           publishedAt: meta.publishedAt,
           result: transcriptResult,
         })
-        db.prepare(
-          `UPDATE videos SET transcript_status = 'available', transcript_file_path = ? WHERE youtube_video_id = ?`
-        ).run(transcriptPath, videoId)
       } catch (err) {
         db.prepare(
           `UPDATE videos SET transcript_status = 'failed' WHERE youtube_video_id = ?`
@@ -84,6 +86,29 @@ export function createIngestVideoWorker(transcriptFetchDelayMs = 1000) {
     })
 
     setStage('indexing')
+    if (!transcriptResult || !transcriptPath) {
+      throw new Error('Transcript indexing data was not produced')
+    }
+    try {
+      await new TranscriptIndexer(db).indexTranscript({
+        videoDbId: videoRow.id,
+        videoId,
+        channelId: meta.channelId,
+        title: meta.title,
+        channelTitle: meta.channelTitle,
+        publishedAt: meta.publishedAt,
+        transcriptFilePath: transcriptPath,
+        transcript: transcriptResult,
+      })
+      db.prepare(
+        `UPDATE videos SET transcript_status = 'available', transcript_file_path = ? WHERE youtube_video_id = ?`
+      ).run(transcriptPath, videoId)
+    } catch (err) {
+      db.prepare(
+        `UPDATE videos SET transcript_status = 'failed' WHERE youtube_video_id = ?`
+      ).run(videoId)
+      throw err
+    }
     setStage('summarising')
   }
 }

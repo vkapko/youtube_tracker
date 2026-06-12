@@ -21,6 +21,13 @@ vi.mock('../src/services/transcriptFile', () => ({
   saveTranscript: vi.fn(async () => 'data/transcripts/UCtest/dQw4w9WgXcQ.txt'),
 }))
 
+vi.mock('../src/services/chroma', () => ({
+  ChromaService: class {
+    async indexChunks() {}
+    async resetCollection() {}
+  },
+}))
+
 import app from '../src/app'
 import { getDb } from '../src/db/database'
 import * as youtubeApi from '../src/lib/youtubeApi'
@@ -48,6 +55,7 @@ describe('POST /api/videos/ingest — transcript extraction', () => {
     setJobQueue(new JobQueue({ ingest_video: createIngestVideoWorker(0) }))
     const db = getDb()
     db.prepare('DELETE FROM ingestion_jobs').run()
+    db.prepare('DELETE FROM transcript_chunks').run()
     db.prepare('DELETE FROM videos').run()
     db.prepare('DELETE FROM channels').run()
     mockFetchMeta.mockReset()

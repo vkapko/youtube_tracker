@@ -10,6 +10,13 @@ vi.mock('youtube-transcript', () => ({
   YoutubeTranscript: { fetchTranscript: vi.fn() },
 }))
 
+vi.mock('../src/services/chroma', () => ({
+  ChromaService: class {
+    async indexChunks() {}
+    async resetCollection() {}
+  },
+}))
+
 let tmpDir: string
 
 vi.mock('../src/db/database', async () => {
@@ -134,5 +141,12 @@ describe('POST /api/videos/:youtubeVideoId/transcript', () => {
     const row = db.prepare(`SELECT transcript_status, transcript_file_path FROM videos WHERE youtube_video_id = 'vid1'`).get() as any
     expect(row.transcript_status).toBe('available')
     expect(row.transcript_file_path).toBeTruthy()
+    const chunk = db.prepare(`
+      SELECT tc.chroma_document_id
+      FROM transcript_chunks tc
+      JOIN videos v ON v.id = tc.video_id
+      WHERE v.youtube_video_id = 'vid1'
+    `).get() as { chroma_document_id: string }
+    expect(chunk.chroma_document_id).toBe('vid1:0')
   })
 })

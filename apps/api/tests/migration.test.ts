@@ -25,6 +25,31 @@ describe('runMigration', () => {
       expect(row).toBeDefined()
     })
   }
+
+  it('creates the Chroma document id column for transcript chunks', () => {
+    const cols = db.pragma('table_info(transcript_chunks)') as Array<{ name: string }>
+    expect(cols.some(c => c.name === 'chroma_document_id')).toBe(true)
+  })
+})
+
+describe('runMigration — transcript chunk Chroma document id', () => {
+  it('adds chroma_document_id to existing transcript chunk tables', () => {
+    const db = new BetterSqlite3(':memory:')
+    db.exec(`
+      CREATE TABLE transcript_chunks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        video_id INTEGER NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        text TEXT NOT NULL
+      );
+    `)
+
+    runMigration(db)
+
+    const cols = db.pragma('table_info(transcript_chunks)') as Array<{ name: string }>
+    expect(cols.some(c => c.name === 'chroma_document_id')).toBe(true)
+    db.close()
+  })
 })
 
 describe('runMigration — transcript_path column rename', () => {

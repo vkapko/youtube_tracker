@@ -58,7 +58,7 @@ Failure routing: if `hasCaptions = false` from the YouTube API, mark video `unav
 Pure function. Accepts a `TranscriptResult` and chunking config. Accumulates segments up to ~500 tokens, cuts at the nearest sentence boundary, carries the start timestamp of the first segment in each chunk, overlaps the last 1–2 sentences into the next chunk. Returns `TranscriptChunk[]`. No I/O.
 
 **`chroma.service`**
-Wraps the Chroma SDK. Exposes: index a batch of chunks (sends raw text; Chroma embeds via its default `all-MiniLM-L6-v2` model), query with a text query and optional metadata filters (channelId, date range), delete and recreate the collection (for reindex). All Chroma document IDs use the format `videoId:chunkIndex`.
+Wraps the Chroma SDK. Exposes: index a batch of chunks (passes raw text to the SDK, which embeds locally via its default `Xenova/all-MiniLM-L6-v2` model), query with a text query and optional metadata filters (channelId, date range), delete and recreate the collection (for reindex). All Chroma document IDs use the format `videoId:chunkIndex`.
 
 **`ingestion.service`**
 Orchestrates the full ingestion pipeline for a single video: fetch metadata → fetch transcript → save `.txt` → chunk → store chunks in SQLite → index in Chroma → generate eager summary. Owns the `p-queue` instance (concurrency: 3, 1-second delay between transcript fetches). On server startup, re-hydrates the queue from SQLite by re-enqueuing all jobs with `status = queued` and resetting `status = running` jobs back to `queued`.

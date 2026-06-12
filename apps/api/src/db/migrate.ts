@@ -35,7 +35,9 @@ export function runMigration(db: Database.Database): void {
       chunk_index               INTEGER NOT NULL,
       text                      TEXT    NOT NULL,
       start_timestamp_seconds   REAL,
+      end_timestamp_seconds     REAL,
       token_count               INTEGER,
+      chroma_document_id        TEXT,
       created_at                TEXT    NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -72,5 +74,13 @@ export function runMigration(db: Database.Database): void {
   const hasNew = cols.some(c => c.name === 'transcript_file_path')
   if (hasOld && !hasNew) {
     db.exec(`ALTER TABLE videos RENAME COLUMN transcript_path TO transcript_file_path`)
+  }
+
+  const chunkCols = db.pragma('table_info(transcript_chunks)') as Array<{ name: string }>
+  if (!chunkCols.some(c => c.name === 'chroma_document_id')) {
+    db.exec(`ALTER TABLE transcript_chunks ADD COLUMN chroma_document_id TEXT`)
+  }
+  if (!chunkCols.some(c => c.name === 'end_timestamp_seconds')) {
+    db.exec(`ALTER TABLE transcript_chunks ADD COLUMN end_timestamp_seconds REAL`)
   }
 }

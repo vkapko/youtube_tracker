@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express'
 import { getDb } from '../db/database'
 import { ManualTranscriptProvider } from '../services/transcript'
 import { saveTranscript, readTranscript } from '../services/transcriptFile'
+import { TranscriptIndexer } from '../services/transcriptIndexing'
 
 const router = Router({ mergeParams: true })
 
@@ -38,6 +39,17 @@ router.post('/:youtubeVideoId/transcript', async (req: Request, res: Response) =
       channelName: video.channel_name ?? '',
       publishedAt: video.published_at ?? '',
       result,
+    })
+
+    await new TranscriptIndexer(db).indexTranscript({
+      videoDbId: video.id,
+      videoId: youtubeVideoId,
+      channelId: video.youtube_channel_id,
+      title: video.title,
+      channelTitle: video.channel_name ?? '',
+      publishedAt: video.published_at ?? '',
+      transcriptFilePath: transcriptPath,
+      transcript: result,
     })
 
     db.prepare(`

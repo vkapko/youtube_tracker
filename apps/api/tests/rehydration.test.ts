@@ -11,6 +11,12 @@ vi.mock('../src/db/database', async () => {
 vi.mock('../src/lib/youtubeApi', () => ({ fetchVideoMetadata: vi.fn() }))
 vi.mock('../src/services/transcriptFile', () => ({ saveTranscript: vi.fn(async () => 'path/x.txt') }))
 vi.mock('youtube-transcript', () => ({ YoutubeTranscript: { fetchTranscript: vi.fn() } }))
+vi.mock('../src/services/chroma', () => ({
+  ChromaService: class {
+    async indexChunks() {}
+    async resetCollection() {}
+  },
+}))
 
 import { getDb } from '../src/db/database'
 import { JobQueue } from '../src/services/jobQueue'
@@ -40,6 +46,7 @@ describe('re-hydration query', () => {
   beforeEach(() => {
     const db = getDb()
     db.prepare('DELETE FROM ingestion_jobs').run()
+    db.prepare('DELETE FROM transcript_chunks').run()
     db.prepare('DELETE FROM videos').run()
     db.prepare('DELETE FROM channels').run()
     vi.mocked(youtubeApi.fetchVideoMetadata).mockReset()
@@ -68,6 +75,7 @@ describe('rehydrate()', () => {
   beforeEach(() => {
     const db = getDb()
     db.prepare('DELETE FROM ingestion_jobs').run()
+    db.prepare('DELETE FROM transcript_chunks').run()
     db.prepare('DELETE FROM videos').run()
     db.prepare('DELETE FROM channels').run()
     vi.mocked(youtubeApi.fetchVideoMetadata).mockReset()

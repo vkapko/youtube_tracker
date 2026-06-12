@@ -21,6 +21,17 @@ vi.mock('youtube-transcript', () => ({
   YoutubeTranscript: { fetchTranscript: vi.fn() },
 }))
 
+const { mockIndexChunks } = vi.hoisted(() => ({
+  mockIndexChunks: vi.fn(async () => {}),
+}))
+
+vi.mock('../src/services/chroma', () => ({
+  ChromaService: class {
+    indexChunks = mockIndexChunks
+    async resetCollection() {}
+  },
+}))
+
 import app from '../src/app'
 import { getDb } from '../src/db/database'
 import * as youtubeApi from '../src/lib/youtubeApi'
@@ -49,10 +60,13 @@ describe('POST /api/videos/ingest', () => {
     setJobQueue(new JobQueue({ ingest_video: createIngestVideoWorker(0) }))
     const db = getDb()
     db.prepare('DELETE FROM ingestion_jobs').run()
+    db.prepare('DELETE FROM transcript_chunks').run()
     db.prepare('DELETE FROM videos').run()
     db.prepare('DELETE FROM channels').run()
     mockFetchMeta.mockReset()
     mockFetchTranscript.mockReset()
+    mockIndexChunks.mockReset()
+    mockIndexChunks.mockResolvedValue(undefined)
   })
 
   it('job transitions to completed after successful ingest', async () => {
@@ -73,6 +87,48 @@ describe('POST /api/videos/ingest', () => {
       `SELECT transcript_status FROM videos WHERE youtube_video_id = 'dQw4w9WgXcQ'`
     ).get() as any
     expect(video.transcript_status).toBe('available')
+  })
+
+  it('stores transcript chunks after saving the transcript', async () => {
+    mockFetchMeta.mockResolvedValue(baseMeta)
+    mockFetchTranscript.mockResolvedValue([
+      { text: 'First sentence.', offset: 0, duration: 2000 },
+      { text: 'Second sentence.', offset: 5000, duration: 2000 },
+    ])
+
+    const res = await request(app)
+      .post('/api/videos/ingest')
+      .send({ url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' })
+    await jobQueue.waitForIdle()
+
+    const rows = getDb().prepare(`
+      SELECT tc.chunk_index, tc.chroma_document_id
+      FROM transcript_chunks tc
+      JOIN videos v ON v.id = tc.video_id
+      WHERE v.youtube_video_id = 'dQw4w9WgXcQ'
+    `).all() as Array<{ chunk_index: number; chroma_document_id: string }>
+
+    expect(res.status).toBe(202)
+    expect(rows).toEqual([{ chunk_index: 0, chroma_document_id: 'dQw4w9WgXcQ:0' }])
+  })
+
+  it('does not mark the transcript available when Chroma indexing fails', async () => {
+    mockFetchMeta.mockResolvedValue(baseMeta)
+    mockFetchTranscript.mockResolvedValue([
+      { text: 'Transcript sentence.', offset: 0, duration: 2000 },
+    ])
+    mockIndexChunks.mockRejectedValue(new Error('Chroma unavailable'))
+
+    await request(app)
+      .post('/api/videos/ingest')
+      .send({ url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' })
+    await jobQueue.waitForIdle()
+
+    const video = getDb().prepare(`
+      SELECT transcript_status FROM videos WHERE youtube_video_id = 'dQw4w9WgXcQ'
+    `).get() as { transcript_status: string }
+
+    expect(video.transcript_status).toBe('failed')
   })
 
   it('job transitions to failed with error_message when transcript fetch throws', async () => {
@@ -141,6 +197,7 @@ describe('POST /api/channels/:id/sync', () => {
     setJobQueue(new JobQueue({ channel_sync: async () => {} }))
     const db = getDb()
     db.prepare('DELETE FROM ingestion_jobs').run()
+    db.prepare('DELETE FROM transcript_chunks').run()
     db.prepare('DELETE FROM videos').run()
     db.prepare('DELETE FROM channels').run()
   })
@@ -169,6 +226,13 @@ describe('POST /api/channels/:id/sync', () => {
 })
 
 describe('ingest progress stages', () => {
+  beforeEach(() => {
+    const db = getDb()
+    db.prepare('DELETE FROM transcript_chunks').run()
+    db.prepare('DELETE FROM videos').run()
+    db.prepare('DELETE FROM channels').run()
+  })
+
   it('emits the complete ingestion stage sequence', async () => {
     vi.mocked(youtubeApi.fetchVideoMetadata).mockResolvedValue(baseMeta)
     vi.mocked(ytLib.YoutubeTranscript.fetchTranscript).mockResolvedValue([

@@ -5,6 +5,7 @@
   "scripts": {
     "dev:api": "npm run dev --workspace=apps/api",
     "dev:web": "npm run dev --workspace=apps/web",
-    "db:migrate": "npm run db:migrate --workspace=apps/api"
+    "db:migrate": "npm run db:migrate --workspace=apps/api",
+    "reindex": "npm run reindex --workspace=apps/api"
   }
 }
