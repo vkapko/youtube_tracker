@@ -26,6 +26,27 @@ interface Segment {
   text: string
 }
 
+type LazySummaryType = 'detailed_summary' | 'action_items' | 'technical_terms' | 'notable_quotes'
+
+interface LazySummaryState {
+  content: string | string[] | null
+  loading: boolean
+}
+
+const LAZY_SUMMARY_LABELS: Record<LazySummaryType, string> = {
+  detailed_summary: 'Detailed Summary',
+  action_items: 'Action Items',
+  technical_terms: 'Technical Terms',
+  notable_quotes: 'Notable Quotes',
+}
+
+const LAZY_SUMMARY_TYPES: LazySummaryType[] = [
+  'detailed_summary',
+  'action_items',
+  'technical_terms',
+  'notable_quotes',
+]
+
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600)
   const m = Math.floor((seconds % 3600) / 60)
@@ -50,6 +71,18 @@ function TranscriptStatusBadge({ status }: { status: string }) {
   )
 }
 
+const BTN_STYLE: React.CSSProperties = {
+  padding: '0.35rem 0.8rem',
+  fontSize: '0.85rem',
+  cursor: 'pointer',
+}
+
+const BTN_DISABLED_STYLE: React.CSSProperties = {
+  ...BTN_STYLE,
+  cursor: 'not-allowed',
+  opacity: 0.6,
+}
+
 export default function VideoDetailPage() {
   const { youtubeVideoId } = useParams<{ youtubeVideoId: string }>()
   const [video, setVideo] = useState<Video | null>(null)
@@ -57,6 +90,12 @@ export default function VideoDetailPage() {
   const [summary, setSummary] = useState<Summary | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [error, setError] = useState('')
+
+  const [lazySummaries, setLazySummaries] = useState<Record<LazySummaryType, LazySummaryState>>(
+    () => Object.fromEntries(
+      LAZY_SUMMARY_TYPES.map(t => [t, { content: null, loading: false }])
+    ) as Record<LazySummaryType, LazySummaryState>
+  )
 
   const fetchVideo = useCallback(() => {
     if (!youtubeVideoId) return
@@ -91,8 +130,54 @@ export default function VideoDetailPage() {
     }
   }, [youtubeVideoId, retrying])
 
+  const fetchLazySummary = useCallback(async (type: LazySummaryType) => {
+    if (!youtubeVideoId) return
+    setLazySummaries(prev => ({ ...prev, [type]: { ...prev[type], loading: true } }))
+    try {
+      const r = await fetch(`/api/videos/${youtubeVideoId}/summary/${type}`)
+      if (r.ok) {
+        const data = await r.json()
+        setLazySummaries(prev => ({ ...prev, [type]: { content: data.content, loading: false } }))
+      } else {
+        setLazySummaries(prev => ({ ...prev, [type]: { content: null, loading: false } }))
+      }
+    } catch {
+      setLazySummaries(prev => ({ ...prev, [type]: { content: null, loading: false } }))
+    }
+  }, [youtubeVideoId])
+
+  const regenerateLazySummary = useCallback(async (type: LazySummaryType) => {
+    if (!youtubeVideoId) return
+    setLazySummaries(prev => ({ ...prev, [type]: { ...prev[type], loading: true } }))
+    try {
+      const r = await fetch(`/api/videos/${youtubeVideoId}/summary/${type}`, { method: 'POST' })
+      if (r.ok) {
+        const data = await r.json()
+        setLazySummaries(prev => ({ ...prev, [type]: { content: data.content, loading: false } }))
+      } else {
+        setLazySummaries(prev => ({ ...prev, [type]: { content: prev[type].content, loading: false } }))
+      }
+    } catch {
+      setLazySummaries(prev => ({ ...prev, [type]: { content: prev[type].content, loading: false } }))
+    }
+  }, [youtubeVideoId])
+
   useEffect(() => { fetchVideo() }, [fetchVideo])
   useEffect(() => { fetchSummary() }, [fetchSummary])
+
+  useEffect(() => {
+    if (!youtubeVideoId) return
+    LAZY_SUMMARY_TYPES.forEach(type => {
+      fetch(`/api/videos/${youtubeVideoId}/summary/${type}?cacheOnly=true`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data?.content != null) {
+            setLazySummaries(prev => ({ ...prev, [type]: { content: data.content, loading: false } }))
+          }
+        })
+        .catch(() => {/* cached summaries simply won't pre-populate */})
+    })
+  }, [youtubeVideoId])
 
   useEffect(() => {
     if (!video || video.transcript_status !== 'available') return
@@ -178,12 +263,7 @@ export default function VideoDetailPage() {
               <button
                 onClick={retrySummary}
                 disabled={retrying}
-                style={{
-                  padding: '0.35rem 0.8rem',
-                  fontSize: '0.85rem',
-                  cursor: retrying ? 'not-allowed' : 'pointer',
-                  opacity: retrying ? 0.6 : 1,
-                }}
+                style={retrying ? BTN_DISABLED_STYLE : BTN_STYLE}
               >
                 {retrying ? 'Retrying…' : 'Retry Summary'}
               </button>
@@ -199,18 +279,80 @@ export default function VideoDetailPage() {
                 <button
                   onClick={retrySummary}
                   disabled={retrying}
-                  style={{
-                    padding: '0.35rem 0.8rem',
-                    fontSize: '0.85rem',
-                    cursor: retrying ? 'not-allowed' : 'pointer',
-                    opacity: retrying ? 0.6 : 1,
-                  }}
+                  style={retrying ? BTN_DISABLED_STYLE : BTN_STYLE}
                 >
                   {retrying ? 'Retrying…' : 'Generate Summary'}
                 </button>
               )}
             </div>
           )}
+        </section>
+      )}
+
+      {video.transcript_status === 'available' && (
+        <section style={{ marginTop: '2rem' }}>
+          <h2 style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>Analysis</h2>
+          {LAZY_SUMMARY_TYPES.map(type => {
+            const state = lazySummaries[type]
+            const label = LAZY_SUMMARY_LABELS[type]
+            const wasGenerated = state.content !== null
+            const hasContent = wasGenerated && (
+              typeof state.content === 'string'
+                ? state.content.length > 0
+                : (state.content as string[]).length > 0
+            )
+
+            return (
+              <div
+                key={type}
+                style={{
+                  border: '1px solid #e0e0e0',
+                  borderRadius: 6,
+                  padding: '1rem',
+                  marginBottom: '0.75rem',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: wasGenerated ? '0.75rem' : 0 }}>
+                  <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600 }}>{label}</h3>
+                  {state.loading && (
+                    <span style={{ fontSize: '0.8rem', color: '#888' }}>Generating…</span>
+                  )}
+                  {!state.loading && !wasGenerated && (
+                    <button
+                      onClick={() => fetchLazySummary(type)}
+                      style={BTN_STYLE}
+                    >
+                      Generate
+                    </button>
+                  )}
+                  {!state.loading && wasGenerated && (
+                    <button
+                      onClick={() => regenerateLazySummary(type)}
+                      style={{ ...BTN_STYLE, fontSize: '0.8rem' }}
+                    >
+                      Regenerate
+                    </button>
+                  )}
+                </div>
+
+                {wasGenerated && !hasContent && (
+                  <p style={{ margin: 0, color: '#888', fontSize: '0.9rem' }}>Nothing found.</p>
+                )}
+
+                {hasContent && typeof state.content === 'string' && (
+                  <p style={{ margin: 0, color: '#333', whiteSpace: 'pre-wrap' }}>{state.content}</p>
+                )}
+
+                {hasContent && Array.isArray(state.content) && (
+                  <ul style={{ margin: 0, paddingLeft: '1.25rem' }}>
+                    {(state.content as string[]).map((item, i) => (
+                      <li key={i} style={{ color: '#333', marginBottom: '0.25rem' }}>{item}</li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )
+          })}
         </section>
       )}
 

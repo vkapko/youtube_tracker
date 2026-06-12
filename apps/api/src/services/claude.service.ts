@@ -79,6 +79,69 @@ const RECORD_SUMMARY_TOOL: Anthropic.Tool = {
   },
 }
 
+const RECORD_DETAILED_SUMMARY_TOOL: Anthropic.Tool = {
+  name: 'record_detailed_summary',
+  description: 'Record a detailed summary of the video.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      detailedSummary: {
+        type: 'string',
+        description: 'A detailed, multi-paragraph summary covering all major points discussed.',
+      },
+    },
+    required: ['detailedSummary'],
+  },
+}
+
+const RECORD_ACTION_ITEMS_TOOL: Anthropic.Tool = {
+  name: 'record_action_items',
+  description: 'Record actionable items from the video.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      actionItems: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Concrete, actionable steps or recommendations mentioned in the video.',
+      },
+    },
+    required: ['actionItems'],
+  },
+}
+
+const RECORD_TECHNICAL_TERMS_TOOL: Anthropic.Tool = {
+  name: 'record_technical_terms',
+  description: 'Record technical terms from the video.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      technicalTerms: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Technical terms, jargon, or concepts introduced or explained in the video.',
+      },
+    },
+    required: ['technicalTerms'],
+  },
+}
+
+const RECORD_NOTABLE_QUOTES_TOOL: Anthropic.Tool = {
+  name: 'record_notable_quotes',
+  description: 'Record notable quotes from the video.',
+  input_schema: {
+    type: 'object' as const,
+    properties: {
+      notableQuotes: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Memorable or important quotes from the video.',
+      },
+    },
+    required: ['notableQuotes'],
+  },
+}
+
 export class ClaudeService {
   private readonly model: string
   private readonly maxTokensPerSection: number
@@ -98,6 +161,35 @@ export class ClaudeService {
     this.countTokensFn = options.countTokensFn ?? countTokens
   }
 
+  // Forced tool_choice is incompatible with extended thinking; use auto when thinking is on.
+  private async callWithTool<T>(
+    tool: Anthropic.Tool,
+    toolName: string,
+    prompt: string,
+    extract: (input: unknown) => T
+  ): Promise<T> {
+    const useThinking = supportsThinking(this.model)
+    const thinking = useThinking
+      ? { thinking: { type: 'enabled' as const, budget_tokens: THINKING_BUDGET_TOKENS } }
+      : {}
+    const toolChoice = useThinking
+      ? { type: 'auto' as const }
+      : { type: 'tool' as const, name: toolName }
+    const response = await this.anthropic.messages.create({
+      model: this.model,
+      max_tokens: 8000,
+      ...thinking,
+      tools: [tool],
+      tool_choice: toolChoice,
+      messages: [{ role: 'user', content: prompt }],
+    })
+    const toolUse = response.content.find(
+      (b): b is Anthropic.ToolUseBlock => b.type === 'tool_use' && b.name === toolName
+    )
+    if (!toolUse) throw new Error(`Claude did not call the ${toolName} tool`)
+    return extract(toolUse.input)
+  }
+
   async summarizeVideo(meta: VideoMeta, transcriptText: string): Promise<SummarizeResult> {
     const tokenCount = this.countTokensFn(transcriptText)
     if (tokenCount <= this.maxTokensPerSection) {
@@ -107,28 +199,15 @@ export class ClaudeService {
   }
 
   private async summarizeSingle(meta: VideoMeta, transcript: string): Promise<SummarizeResult> {
-    const useThinking = supportsThinking(this.model)
-    const thinking = useThinking
-      ? { thinking: { type: 'enabled' as const, budget_tokens: THINKING_BUDGET_TOKENS } }
-      : {}
-    // Forced tool_choice is incompatible with extended thinking; use auto when thinking is on.
-    const toolChoice = useThinking
-      ? { type: 'auto' as const }
-      : { type: 'tool' as const, name: 'record_summary' }
-    const response = await this.anthropic.messages.create({
-      model: this.model,
-      max_tokens: 8000,
-      ...thinking,
-      tools: [RECORD_SUMMARY_TOOL],
-      tool_choice: toolChoice,
-      messages: [
-        {
-          role: 'user',
-          content: `Summarize this YouTube video.\n\nTitle: ${meta.title}\nChannel: ${meta.channelTitle}\n\nTranscript:\n${transcript}`,
-        },
-      ],
-    })
-    return this.extractFromResponse(response)
+    return this.callWithTool(
+      RECORD_SUMMARY_TOOL,
+      'record_summary',
+      `Summarize this YouTube video.\n\nTitle: ${meta.title}\nChannel: ${meta.channelTitle}\n\nTranscript:\n${transcript}`,
+      (input) => {
+        const i = input as { shortSummary: string; keyTopics: string[] }
+        return { shortSummary: i.shortSummary, keyTopics: i.keyTopics }
+      }
+    )
   }
 
   private async summarizeMapReduce(
@@ -170,27 +249,15 @@ export class ClaudeService {
       // to split further. Fall through and let the API handle it best-effort.
     }
 
-    const useThinking = supportsThinking(this.model)
-    const thinking = useThinking
-      ? { thinking: { type: 'enabled' as const, budget_tokens: THINKING_BUDGET_TOKENS } }
-      : {}
-    const toolChoice = useThinking
-      ? { type: 'auto' as const }
-      : { type: 'tool' as const, name: 'record_summary' }
-    const response = await this.anthropic.messages.create({
-      model: this.model,
-      max_tokens: 8000,
-      ...thinking,
-      tools: [RECORD_SUMMARY_TOOL],
-      tool_choice: toolChoice,
-      messages: [
-        {
-          role: 'user',
-          content: `Combine these section summaries into a single coherent summary for the full video.\n\nTitle: ${meta.title}\nChannel: ${meta.channelTitle}\n\nSection summaries:\n${combinedText}`,
-        },
-      ],
-    })
-    return this.extractFromResponse(response)
+    return this.callWithTool(
+      RECORD_SUMMARY_TOOL,
+      'record_summary',
+      `Combine these section summaries into a single coherent summary for the full video.\n\nTitle: ${meta.title}\nChannel: ${meta.channelTitle}\n\nSection summaries:\n${combinedText}`,
+      (input) => {
+        const i = input as { shortSummary: string; keyTopics: string[] }
+        return { shortSummary: i.shortSummary, keyTopics: i.keyTopics }
+      }
+    )
   }
 
   private splitIntoSections(text: string): string[] {
@@ -244,15 +311,147 @@ export class ClaudeService {
     return sections
   }
 
-  private extractFromResponse(response: Anthropic.Message): SummarizeResult {
-    const toolUse = response.content.find(
-      (block): block is Anthropic.ToolUseBlock =>
-        block.type === 'tool_use' && block.name === 'record_summary'
-    )
-    if (!toolUse) {
-      throw new Error('Claude did not call the record_summary tool')
+  async generateDetailedSummary(meta: VideoMeta, transcriptText: string): Promise<string> {
+    const tokenCount = this.countTokensFn(transcriptText)
+    if (tokenCount <= this.maxTokensPerSection) {
+      return this.detailedSummarySingle(meta, transcriptText)
     }
-    const input = toolUse.input as { shortSummary: string; keyTopics: string[] }
-    return { shortSummary: input.shortSummary, keyTopics: input.keyTopics }
+    const sections = this.splitIntoSections(transcriptText)
+    const partials: string[] = []
+    for (let i = 0; i < sections.length; i++) {
+      partials.push(
+        await this.detailedSummarySingle(
+          { title: `${meta.title} (part ${i + 1}/${sections.length})`, channelTitle: meta.channelTitle },
+          sections[i]
+        )
+      )
+    }
+    return this.reduceDetailedSummary(meta, partials)
+  }
+
+  private async reduceDetailedSummary(meta: VideoMeta, partials: string[]): Promise<string> {
+    if (partials.length === 1) return partials[0]
+
+    const combinedText = partials.map((s, i) => `Part ${i + 1}: ${s}`).join('\n\n')
+
+    if (this.countTokensFn(combinedText) > this.maxTokensPerSection) {
+      if (partials.length > 2) {
+        const mid = Math.ceil(partials.length / 2)
+        const [left, right] = await Promise.all([
+          this.reduceDetailedSummary(meta, partials.slice(0, mid)),
+          this.reduceDetailedSummary(meta, partials.slice(mid)),
+        ])
+        return this.reduceDetailedSummary(meta, [left, right])
+      }
+      // length === 2 and still over budget: individual summaries are too large to split further; fall through best-effort
+    }
+
+    return this.detailedSummarySingle(meta, `[Combine into one detailed summary]\n\nSection summaries:\n${combinedText}`)
+  }
+
+  private detailedSummarySingle(meta: VideoMeta, transcript: string): Promise<string> {
+    return this.callWithTool(
+      RECORD_DETAILED_SUMMARY_TOOL,
+      'record_detailed_summary',
+      `Generate a detailed summary of this YouTube video.\n\nTitle: ${meta.title}\nChannel: ${meta.channelTitle}\n\nTranscript:\n${transcript}`,
+      (input) => (input as { detailedSummary: string }).detailedSummary
+    )
+  }
+
+  async generateActionItems(meta: VideoMeta, transcriptText: string): Promise<string[]> {
+    return this.generateArrayLazy(
+      meta, transcriptText,
+      RECORD_ACTION_ITEMS_TOOL,
+      'Extract action items from this YouTube video',
+      'Combine these action items from each section into a final deduplicated list',
+      'record_action_items', 'actionItems'
+    )
+  }
+
+  async generateTechnicalTerms(meta: VideoMeta, transcriptText: string): Promise<string[]> {
+    return this.generateArrayLazy(
+      meta, transcriptText,
+      RECORD_TECHNICAL_TERMS_TOOL,
+      'Extract technical terms from this YouTube video',
+      'Combine these technical terms from each section into a final deduplicated list',
+      'record_technical_terms', 'technicalTerms'
+    )
+  }
+
+  async generateNotableQuotes(meta: VideoMeta, transcriptText: string): Promise<string[]> {
+    return this.generateArrayLazy(
+      meta, transcriptText,
+      RECORD_NOTABLE_QUOTES_TOOL,
+      'Extract notable quotes from this YouTube video',
+      'Combine these notable quotes from each section into a final deduplicated list',
+      'record_notable_quotes', 'notableQuotes'
+    )
+  }
+
+  private async generateArrayLazy(
+    meta: VideoMeta,
+    transcriptText: string,
+    tool: Anthropic.Tool,
+    taskDescription: string,
+    reduceDescription: string,
+    toolName: string,
+    resultKey: string
+  ): Promise<string[]> {
+    const extract = (input: unknown) => (input as Record<string, string[]>)[resultKey]
+
+    const tokenCount = this.countTokensFn(transcriptText)
+    if (tokenCount <= this.maxTokensPerSection) {
+      return this.callWithTool(
+        tool, toolName,
+        `${taskDescription}.\n\nTitle: ${meta.title}\nChannel: ${meta.channelTitle}\n\nTranscript:\n${transcriptText}`,
+        extract
+      )
+    }
+
+    const sections = this.splitIntoSections(transcriptText)
+    const partials: string[][] = []
+    for (let i = 0; i < sections.length; i++) {
+      const partMeta = { title: `${meta.title} (part ${i + 1}/${sections.length})`, channelTitle: meta.channelTitle }
+      partials.push(
+        await this.callWithTool(
+          tool, toolName,
+          `${taskDescription}.\n\nTitle: ${partMeta.title}\nChannel: ${partMeta.channelTitle}\n\nTranscript:\n${sections[i]}`,
+          extract
+        )
+      )
+    }
+
+    return this.reduceArray(meta, partials, tool, toolName, reduceDescription, extract)
+  }
+
+  private async reduceArray(
+    meta: VideoMeta,
+    partials: string[][],
+    tool: Anthropic.Tool,
+    toolName: string,
+    reduceDescription: string,
+    extract: (input: unknown) => string[]
+  ): Promise<string[]> {
+    if (partials.length === 1) return partials[0]
+
+    const combinedText = partials.map((items, i) => `Part ${i + 1}:\n${items.map(item => `- ${item}`).join('\n')}`).join('\n\n')
+
+    if (this.countTokensFn(combinedText) > this.maxTokensPerSection) {
+      if (partials.length > 2) {
+        const mid = Math.ceil(partials.length / 2)
+        const [left, right] = await Promise.all([
+          this.reduceArray(meta, partials.slice(0, mid), tool, toolName, reduceDescription, extract),
+          this.reduceArray(meta, partials.slice(mid), tool, toolName, reduceDescription, extract),
+        ])
+        return this.reduceArray(meta, [left, right], tool, toolName, reduceDescription, extract)
+      }
+      // length === 2 and still over budget: fall through best-effort
+    }
+
+    return this.callWithTool(
+      tool, toolName,
+      `${reduceDescription} for the full video.\n\nTitle: ${meta.title}\nChannel: ${meta.channelTitle}\n\nSection items:\n${combinedText}`,
+      extract
+    )
   }
 }

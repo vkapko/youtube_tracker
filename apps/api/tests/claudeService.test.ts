@@ -248,3 +248,82 @@ describe('ClaudeService.summarizeVideo', () => {
     process.env.CLAUDE_SUMMARY_MODEL = originalEnv
   })
 })
+
+describe('ClaudeService — lazy summarization', () => {
+  let mockCreate: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    mockCreate = vi.fn()
+  })
+
+  it('generateDetailedSummary returns detailed summary text', async () => {
+    mockCreate.mockResolvedValueOnce({
+      stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', name: 'record_detailed_summary', input: { detailedSummary: 'A detailed multi-paragraph summary.' } }],
+    })
+    const service = new ClaudeService(makeClient(mockCreate))
+    const result = await service.generateDetailedSummary(
+      { title: 'ML Basics', channelTitle: 'AI School' },
+      'Some transcript text here.'
+    )
+    expect(result).toBe('A detailed multi-paragraph summary.')
+  })
+
+  it('generateActionItems returns array of action items', async () => {
+    mockCreate.mockResolvedValueOnce({
+      stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', name: 'record_action_items', input: { actionItems: ['Read the paper', 'Try the demo'] } }],
+    })
+    const service = new ClaudeService(makeClient(mockCreate))
+    const result = await service.generateActionItems(
+      { title: 'ML Basics', channelTitle: 'AI School' },
+      'Some transcript text here.'
+    )
+    expect(result).toEqual(['Read the paper', 'Try the demo'])
+  })
+
+  it('generateTechnicalTerms returns array of technical terms', async () => {
+    mockCreate.mockResolvedValueOnce({
+      stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', name: 'record_technical_terms', input: { technicalTerms: ['gradient descent', 'backpropagation'] } }],
+    })
+    const service = new ClaudeService(makeClient(mockCreate))
+    const result = await service.generateTechnicalTerms(
+      { title: 'ML Basics', channelTitle: 'AI School' },
+      'Some transcript text here.'
+    )
+    expect(result).toEqual(['gradient descent', 'backpropagation'])
+  })
+
+  it('generateNotableQuotes returns array of notable quotes', async () => {
+    mockCreate.mockResolvedValueOnce({
+      stop_reason: 'tool_use',
+      content: [{ type: 'tool_use', name: 'record_notable_quotes', input: { notableQuotes: ['Learning never exhausts the mind.'] } }],
+    })
+    const service = new ClaudeService(makeClient(mockCreate))
+    const result = await service.generateNotableQuotes(
+      { title: 'ML Basics', channelTitle: 'AI School' },
+      'Some transcript text here.'
+    )
+    expect(result).toEqual(['Learning never exhausts the mind.'])
+  })
+
+  it('generateDetailedSummary applies map-reduce when transcript exceeds maxTokensPerSection', async () => {
+    mockCreate
+      .mockResolvedValueOnce({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'record_detailed_summary', input: { detailedSummary: 'Part 1 detail.' } }] })
+      .mockResolvedValueOnce({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'record_detailed_summary', input: { detailedSummary: 'Part 2 detail.' } }] })
+      .mockResolvedValueOnce({ stop_reason: 'tool_use', content: [{ type: 'tool_use', name: 'record_detailed_summary', input: { detailedSummary: 'Combined detailed summary.' } }] })
+
+    const service = new ClaudeService(makeClient(mockCreate), {
+      maxTokensPerSection: 5,
+      countTokensFn: (text: string) => text.split(' ').filter(w => w.length > 0).length,
+    })
+    const result = await service.generateDetailedSummary(
+      { title: 'Long Video', channelTitle: 'Channel' },
+      'first half of the transcript second half of the transcript'
+    )
+
+    expect(mockCreate).toHaveBeenCalledTimes(3)
+    expect(result).toBe('Combined detailed summary.')
+  })
+})
