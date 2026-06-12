@@ -15,6 +15,12 @@ interface Video {
   summary_status: string
 }
 
+interface Summary {
+  status: string
+  shortSummary?: string
+  keyTopics?: string[]
+}
+
 interface Segment {
   startSeconds?: number
   text: string
@@ -48,6 +54,8 @@ export default function VideoDetailPage() {
   const { youtubeVideoId } = useParams<{ youtubeVideoId: string }>()
   const [video, setVideo] = useState<Video | null>(null)
   const [segments, setSegments] = useState<Segment[] | null>(null)
+  const [summary, setSummary] = useState<Summary | null>(null)
+  const [retrying, setRetrying] = useState(false)
   const [error, setError] = useState('')
 
   const fetchVideo = useCallback(() => {
@@ -61,7 +69,30 @@ export default function VideoDetailPage() {
       .catch(() => setError('Failed to load video'))
   }, [youtubeVideoId])
 
+  const fetchSummary = useCallback(() => {
+    if (!youtubeVideoId) return
+    fetch(`/api/videos/${youtubeVideoId}/summaries`)
+      .then(r => r.json())
+      .then((data: Summary) => setSummary(data))
+      .catch(() => {/* summary simply won't render */})
+  }, [youtubeVideoId])
+
+  const retrySummary = useCallback(async () => {
+    if (!youtubeVideoId || retrying) return
+    setRetrying(true)
+    try {
+      const r = await fetch(`/api/videos/${youtubeVideoId}/summaries/retry`, { method: 'POST' })
+      const data = await r.json()
+      setSummary(r.ok ? data : { status: 'failed' })
+    } catch {
+      setSummary({ status: 'failed' })
+    } finally {
+      setRetrying(false)
+    }
+  }, [youtubeVideoId, retrying])
+
   useEffect(() => { fetchVideo() }, [fetchVideo])
+  useEffect(() => { fetchSummary() }, [fetchSummary])
 
   useEffect(() => {
     if (!video || video.transcript_status !== 'available') return
@@ -108,6 +139,81 @@ export default function VideoDetailPage() {
       />
       <p style={{ whiteSpace: 'pre-line', color: '#444' }}>{video.description}</p>
 
+      {summary && (
+        <section style={{ marginTop: '2rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.75rem' }}>
+            <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Summary</h2>
+            <TranscriptStatusBadge status={summary.status} />
+          </div>
+
+          {summary.status === 'available' && (
+            <>
+              <p style={{ margin: '0 0 0.75rem', color: '#333' }}>{summary.shortSummary}</p>
+              {summary.keyTopics && summary.keyTopics.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                  {summary.keyTopics.map(topic => (
+                    <span
+                      key={topic}
+                      style={{
+                        background: '#e3f2fd',
+                        color: '#1565c0',
+                        padding: '0.2rem 0.6rem',
+                        borderRadius: 12,
+                        fontSize: '0.8rem',
+                      }}
+                    >
+                      {topic}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          {summary.status === 'failed' && (
+            <div>
+              <p style={{ color: '#c62828', fontSize: '0.9rem', margin: '0 0 0.5rem' }}>
+                Summarization failed.
+              </p>
+              <button
+                onClick={retrySummary}
+                disabled={retrying}
+                style={{
+                  padding: '0.35rem 0.8rem',
+                  fontSize: '0.85rem',
+                  cursor: retrying ? 'not-allowed' : 'pointer',
+                  opacity: retrying ? 0.6 : 1,
+                }}
+              >
+                {retrying ? 'Retrying…' : 'Retry Summary'}
+              </button>
+            </div>
+          )}
+
+          {summary.status === 'pending' && (
+            <div>
+              <p style={{ color: '#777', fontSize: '0.9rem', margin: '0 0 0.5rem' }}>
+                Summarization is pending.
+              </p>
+              {video?.transcript_status === 'available' && (
+                <button
+                  onClick={retrySummary}
+                  disabled={retrying}
+                  style={{
+                    padding: '0.35rem 0.8rem',
+                    fontSize: '0.85rem',
+                    cursor: retrying ? 'not-allowed' : 'pointer',
+                    opacity: retrying ? 0.6 : 1,
+                  }}
+                >
+                  {retrying ? 'Retrying…' : 'Generate Summary'}
+                </button>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       <section style={{ marginTop: '2rem' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
           <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Transcript</h2>
@@ -132,7 +238,7 @@ export default function VideoDetailPage() {
             )}
             <ManualTranscriptForm
               videoId={video.youtube_video_id}
-              onSaved={() => { setVideo(null); setSegments(null); fetchVideo() }}
+              onSaved={() => { setVideo(null); setSegments(null); fetchVideo(); fetchSummary() }}
             />
           </div>
         )}

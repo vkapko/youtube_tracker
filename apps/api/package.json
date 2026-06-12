@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.104.1",
     "@chroma-core/default-embed": "^0.1.9",
     "better-sqlite3": "^12.10.0",
     "chromadb": "^3.4.3",

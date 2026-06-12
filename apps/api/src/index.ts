@@ -5,6 +5,7 @@ import { JobQueue, setJobQueue } from './services/jobQueue'
 import { createIngestVideoWorker } from './services/ingestWorker'
 import { createChannelSyncWorker } from './services/channelSyncWorker'
 import { migratePublishedAtIfNeeded } from './services/reindex'
+import { ClaudeService } from './services/claude.service'
 
 const PORT = process.env.PORT ?? '3001'
 
@@ -16,7 +17,7 @@ const PORT = process.env.PORT ?? '3001'
   }
 
   const queue = new JobQueue({
-    ingest_video: createIngestVideoWorker(),
+    ingest_video: createIngestVideoWorker(undefined, new ClaudeService()),
     channel_sync: createChannelSyncWorker(),
   })
   setJobQueue(queue)

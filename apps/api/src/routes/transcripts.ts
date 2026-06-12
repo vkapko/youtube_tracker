@@ -3,6 +3,7 @@ import { getDb } from '../db/database'
 import { ManualTranscriptProvider } from '../services/transcript'
 import { saveTranscript, readTranscript } from '../services/transcriptFile'
 import { TranscriptIndexer } from '../services/transcriptIndexing'
+import { ClaudeService } from '../services/claude.service'
 
 const router = Router({ mergeParams: true })
 
@@ -55,6 +56,21 @@ router.post('/:youtubeVideoId/transcript', async (req: Request, res: Response) =
     db.prepare(`
       UPDATE videos SET transcript_status = 'available', transcript_file_path = ? WHERE youtube_video_id = ?
     `).run(transcriptPath, youtubeVideoId)
+
+    try {
+      const service = new ClaudeService()
+      const summaryResult = await service.summarizeVideo(
+        { title: video.title, channelTitle: video.channel_name ?? '' },
+        result.plainText
+      )
+      db.prepare(`INSERT OR REPLACE INTO summaries (video_id, type, content) VALUES (?, 'short', ?)`)
+        .run(video.id, summaryResult.shortSummary)
+      db.prepare(`INSERT OR REPLACE INTO summaries (video_id, type, content) VALUES (?, 'topics', ?)`)
+        .run(video.id, JSON.stringify(summaryResult.keyTopics))
+      db.prepare(`UPDATE videos SET summary_status = 'available' WHERE id = ?`).run(video.id)
+    } catch {
+      db.prepare(`UPDATE videos SET summary_status = 'failed' WHERE id = ?`).run(video.id)
+    }
 
     res.json({ transcript_status: 'available', transcript_file_path: transcriptPath })
   } catch (err) {

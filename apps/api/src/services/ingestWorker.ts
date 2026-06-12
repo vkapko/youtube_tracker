@@ -3,15 +3,19 @@ import { fetchVideoMetadata } from '../lib/youtubeApi'
 import { getDb } from '../db/database'
 import { YouTubeTranscriptProvider } from './transcript'
 import type { TranscriptResult } from './transcript'
-import { saveTranscript } from './transcriptFile'
+import { saveTranscript, readTranscript } from './transcriptFile'
 import { TranscriptIndexer } from './transcriptIndexing'
+import type { ClaudeService } from './claude.service'
 import type { JobRow } from './jobQueue'
 
 // Shared across all concurrent ingest jobs — enforces at most one YouTube transcript
 // request in flight at a time, with a configurable delay between requests.
 const transcriptRateLimiter = new PQueue({ concurrency: 1 })
 
-export function createIngestVideoWorker(transcriptFetchDelayMs = 1000) {
+export function createIngestVideoWorker(
+  transcriptFetchDelayMs = 1000,
+  claudeService?: Pick<ClaudeService, 'summarizeVideo'>
+) {
   return async function ingestVideoWorker(job: JobRow, setStage: (s: string) => void): Promise<void> {
     const { youtubeVideoId: videoId } = JSON.parse(job.payload) as { youtubeVideoId: string }
 
@@ -55,9 +59,36 @@ export function createIngestVideoWorker(transcriptFetchDelayMs = 1000) {
     if (!meta.hasCaptions) return
 
     const existing = db.prepare(
-      'SELECT transcript_status FROM videos WHERE youtube_video_id = ?'
-    ).get(videoId) as { transcript_status: string }
-    if (existing.transcript_status === 'available') return
+      'SELECT transcript_status, transcript_file_path, summary_status FROM videos WHERE youtube_video_id = ?'
+    ).get(videoId) as { transcript_status: string; transcript_file_path: string | null; summary_status: string }
+
+    if (existing.transcript_status === 'available') {
+      if (claudeService && existing.summary_status !== 'available' && existing.transcript_file_path) {
+        setStage('summarising')
+        try {
+          const segments = await readTranscript(existing.transcript_file_path)
+          const plainText = segments.map(s => s.text).join(' ')
+          const summaryResult = await claudeService.summarizeVideo(
+            { title: meta.title, channelTitle: meta.channelTitle },
+            plainText
+          )
+          db.prepare(
+            `INSERT OR REPLACE INTO summaries (video_id, type, content) VALUES (?, ?, ?)`
+          ).run(videoRow.id, 'short', summaryResult.shortSummary)
+          db.prepare(
+            `INSERT OR REPLACE INTO summaries (video_id, type, content) VALUES (?, ?, ?)`
+          ).run(videoRow.id, 'topics', JSON.stringify(summaryResult.keyTopics))
+          db.prepare(
+            `UPDATE videos SET summary_status = 'available' WHERE id = ?`
+          ).run(videoRow.id)
+        } catch {
+          db.prepare(
+            `UPDATE videos SET summary_status = 'failed' WHERE id = ?`
+          ).run(videoRow.id)
+        }
+      }
+      return
+    }
 
     setStage('fetching_transcript')
     let transcriptResult: TranscriptResult | undefined
@@ -110,5 +141,26 @@ export function createIngestVideoWorker(transcriptFetchDelayMs = 1000) {
       throw err
     }
     setStage('summarising')
+    if (claudeService) {
+      try {
+        const summaryResult = await claudeService.summarizeVideo(
+          { title: meta.title, channelTitle: meta.channelTitle },
+          transcriptResult.plainText
+        )
+        db.prepare(
+          `INSERT OR REPLACE INTO summaries (video_id, type, content) VALUES (?, ?, ?)`
+        ).run(videoRow.id, 'short', summaryResult.shortSummary)
+        db.prepare(
+          `INSERT OR REPLACE INTO summaries (video_id, type, content) VALUES (?, ?, ?)`
+        ).run(videoRow.id, 'topics', JSON.stringify(summaryResult.keyTopics))
+        db.prepare(
+          `UPDATE videos SET summary_status = 'available' WHERE id = ?`
+        ).run(videoRow.id)
+      } catch {
+        db.prepare(
+          `UPDATE videos SET summary_status = 'failed' WHERE id = ?`
+        ).run(videoRow.id)
+      }
+    }
   }
 }

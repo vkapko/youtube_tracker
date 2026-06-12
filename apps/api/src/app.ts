@@ -4,6 +4,7 @@ import transcriptsRouter from './routes/transcripts'
 import jobsRouter from './routes/jobs'
 import channelsRouter from './routes/channels'
 import searchRouter from './routes/search'
+import summariesRouter from './routes/summaries'
 
 const app = express()
 app.use(express.json())
@@ -14,6 +15,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/videos', videosRouter)
 app.use('/api/videos', transcriptsRouter)
+app.use('/api/videos', summariesRouter)
 app.use('/api/jobs', jobsRouter)
 app.use('/api/channels', channelsRouter)
 app.use('/api/search', searchRouter)

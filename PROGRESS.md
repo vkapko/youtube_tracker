@@ -8,7 +8,7 @@
 | [004](docs/issues/004-ingestion-job-queue.md) | Ingestion job queue | ✅ Done |
 | [005](docs/issues/005-chunking-chroma-indexing.md) | Chunking + Chroma indexing | ✅ Done |
 | [006](docs/issues/006-semantic-search.md) | Semantic search | ✅ Done |
-| [007](docs/issues/007-eager-summarization.md) | Eager summarization | 🔲 Todo |
+| [007](docs/issues/007-eager-summarization.md) | Eager summarization | ✅ Done |
 | [008](docs/issues/008-lazy-summarization.md) | Lazy summarization | 🔲 Todo |
 | [009](docs/issues/009-streaming-rag-chat.md) | Streaming RAG chat | 🔲 Todo |
 | [010](docs/issues/010-channel-tracking.md) | Channel tracking | 🔲 Todo |

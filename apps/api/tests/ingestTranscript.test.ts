@@ -149,3 +149,84 @@ describe('POST /api/videos/ingest — transcript extraction', () => {
     expect(row.transcript_status).toBe('unavailable')
   })
 })
+
+describe('POST /api/videos/ingest — summarization', () => {
+  const mockFetchMeta = vi.mocked(youtubeApi.fetchVideoMetadata)
+  const mockFetchTranscript = vi.mocked(ytLib.YoutubeTranscript.fetchTranscript)
+  let mockSummarizeVideo: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    mockSummarizeVideo = vi.fn().mockResolvedValue({
+      shortSummary: 'A great video about ML.',
+      keyTopics: ['machine learning', 'neural networks'],
+    })
+    setJobQueue(new JobQueue({
+      ingest_video: createIngestVideoWorker(0, { summarizeVideo: mockSummarizeVideo } as any),
+    }))
+
+    const db = getDb()
+    db.prepare('DELETE FROM summaries').run()
+    db.prepare('DELETE FROM ingestion_jobs').run()
+    db.prepare('DELETE FROM transcript_chunks').run()
+    db.prepare('DELETE FROM videos').run()
+    db.prepare('DELETE FROM channels').run()
+    mockFetchMeta.mockReset()
+    mockFetchTranscript.mockReset()
+  })
+
+  it('stores summary rows and sets summary_status=available after successful ingest', async () => {
+    mockFetchMeta.mockResolvedValue(baseMeta)
+    mockFetchTranscript.mockResolvedValue([
+      { text: 'Hello world', offset: 0, duration: 2000 },
+    ])
+
+    const res = await request(app)
+      .post('/api/videos/ingest')
+      .send({ url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' })
+
+    expect(res.status).toBe(202)
+    await jobQueue.waitForIdle()
+
+    const db = getDb()
+    const video = db.prepare(
+      `SELECT summary_status FROM videos WHERE youtube_video_id = 'dQw4w9WgXcQ'`
+    ).get() as any
+    expect(video.summary_status).toBe('available')
+
+    const summaries = db.prepare(
+      `SELECT type, content FROM summaries ORDER BY type`
+    ).all() as any[]
+    expect(summaries).toHaveLength(2)
+    expect(summaries.find(s => s.type === 'short')?.content).toBe('A great video about ML.')
+    expect(JSON.parse(summaries.find(s => s.type === 'topics')?.content)).toEqual([
+      'machine learning',
+      'neural networks',
+    ])
+  })
+
+  it('sets summary_status=failed when summarization throws, job still completes', async () => {
+    mockFetchMeta.mockResolvedValue(baseMeta)
+    mockFetchTranscript.mockResolvedValue([
+      { text: 'Hello world', offset: 0, duration: 2000 },
+    ])
+    mockSummarizeVideo.mockRejectedValue(new Error('Claude API unavailable'))
+
+    const res = await request(app)
+      .post('/api/videos/ingest')
+      .send({ url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' })
+
+    expect(res.status).toBe(202)
+    await jobQueue.waitForIdle()
+
+    const db = getDb()
+    const video = db.prepare(
+      `SELECT transcript_status, summary_status FROM videos WHERE youtube_video_id = 'dQw4w9WgXcQ'`
+    ).get() as any
+    // Transcript should still be available despite summarization failure
+    expect(video.transcript_status).toBe('available')
+    expect(video.summary_status).toBe('failed')
+
+    const summaries = db.prepare('SELECT * FROM summaries').all()
+    expect(summaries).toHaveLength(0)
+  })
+})
