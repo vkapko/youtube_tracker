@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import BetterSqlite3 from 'better-sqlite3'
 import { runMigration } from '../src/db/migrate'
-import { reindexAvailableTranscripts } from '../src/services/reindex'
+import { reindexAvailableTranscripts, migratePublishedAtIfNeeded } from '../src/services/reindex'
 
 describe('reindexAvailableTranscripts', () => {
   it('resets Chroma and indexes persisted chunks for available videos only', async () => {
@@ -42,6 +42,42 @@ describe('reindexAvailableTranscripts', () => {
       videoId: 'available-video',
       chunks: [expect.objectContaining({ text: 'Available text.' })],
     }))
+    db.close()
+  })
+})
+
+describe('migratePublishedAtIfNeeded', () => {
+  it('runs reindex and returns true when hasStringPublishedAt is true', async () => {
+    const db = new BetterSqlite3(':memory:')
+    runMigration(db)
+
+    const chroma = {
+      resetCollection: vi.fn(async () => {}),
+      indexChunks: vi.fn(async () => {}),
+      hasStringPublishedAt: vi.fn(async () => true),
+    }
+
+    const result = await migratePublishedAtIfNeeded(db, chroma)
+
+    expect(result).toBe(true)
+    expect(chroma.resetCollection).toHaveBeenCalledOnce()
+    db.close()
+  })
+
+  it('skips reindex and returns false when hasStringPublishedAt is false', async () => {
+    const db = new BetterSqlite3(':memory:')
+    runMigration(db)
+
+    const chroma = {
+      resetCollection: vi.fn(async () => {}),
+      indexChunks: vi.fn(async () => {}),
+      hasStringPublishedAt: vi.fn(async () => false),
+    }
+
+    const result = await migratePublishedAtIfNeeded(db, chroma)
+
+    expect(result).toBe(false)
+    expect(chroma.resetCollection).not.toHaveBeenCalled()
     db.close()
   })
 })

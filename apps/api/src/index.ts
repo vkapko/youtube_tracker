@@ -1,18 +1,28 @@
 import 'dotenv/config'
 import app from './app'
+import { getDb } from './db/database'
 import { JobQueue, setJobQueue } from './services/jobQueue'
 import { createIngestVideoWorker } from './services/ingestWorker'
 import { createChannelSyncWorker } from './services/channelSyncWorker'
+import { migratePublishedAtIfNeeded } from './services/reindex'
 
 const PORT = process.env.PORT ?? '3001'
 
-const queue = new JobQueue({
-  ingest_video: createIngestVideoWorker(),
-  channel_sync: createChannelSyncWorker(),
-})
-setJobQueue(queue)
-queue.rehydrate()
+;(async () => {
+  try {
+    await migratePublishedAtIfNeeded(getDb())
+  } catch (err) {
+    console.warn('Chroma publishedAt migration check failed:', err)
+  }
 
-app.listen(Number(PORT), () => {
-  console.log(`API listening on port ${PORT}`)
-})
+  const queue = new JobQueue({
+    ingest_video: createIngestVideoWorker(),
+    channel_sync: createChannelSyncWorker(),
+  })
+  setJobQueue(queue)
+  queue.rehydrate()
+
+  app.listen(Number(PORT), () => {
+    console.log(`API listening on port ${PORT}`)
+  })
+})()

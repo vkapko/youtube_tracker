@@ -7,6 +7,21 @@ interface ReindexChromaClient {
   indexChunks(options: IndexChunksOptions): Promise<void>
 }
 
+interface MigrateChromaClient extends ReindexChromaClient {
+  hasStringPublishedAt(): Promise<boolean>
+}
+
+export async function migratePublishedAtIfNeeded(
+  db: Database.Database,
+  chroma: MigrateChromaClient = new ChromaService(),
+): Promise<boolean> {
+  if (!(await chroma.hasStringPublishedAt())) return false
+  console.log('Migrating Chroma publishedAt from ISO strings to epoch seconds...')
+  await reindexAvailableTranscripts(db, chroma)
+  console.log('Chroma publishedAt migration complete.')
+  return true
+}
+
 export async function reindexAvailableTranscripts(
   db: Database.Database,
   chroma: ReindexChromaClient = new ChromaService(),

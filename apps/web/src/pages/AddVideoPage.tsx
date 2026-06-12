@@ -1,5 +1,5 @@
 import { useState, useEffect, FormEvent } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 
 type JobStatus = 'queued' | 'running' | 'completed' | 'failed'
 
@@ -108,6 +108,9 @@ export default function AddVideoPage() {
 
   return (
     <div style={{ maxWidth: 600, margin: '2rem auto', padding: '0 1rem' }}>
+      <nav style={{ marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+        <Link to="/search" style={{ color: '#1a73e8' }}>Search</Link>
+      </nav>
       <h1>Add Video</h1>
       <form onSubmit={handleSubmit}>
         <label htmlFor="url">YouTube URL</label>

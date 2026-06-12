@@ -104,7 +104,7 @@ describe('chunkTranscript', () => {
       {
         chunkIndex: 0,
         text: 'First sentence. Second sentence.',
-        startSeconds: undefined,
+        startSeconds: 0,
         endSeconds: undefined,
         tokenCount: 6,
       },
@@ -144,14 +144,14 @@ describe('chunkTranscript', () => {
       {
         chunkIndex: 0,
         text: sentence,
-        startSeconds: undefined,
+        startSeconds: 0,
         endSeconds: undefined,
         tokenCount: 7,
       },
       {
         chunkIndex: 1,
         text: sentence,
-        startSeconds: undefined,
+        startSeconds: 0,
         endSeconds: undefined,
         tokenCount: 7,
       },

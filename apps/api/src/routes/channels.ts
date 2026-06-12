@@ -4,6 +4,13 @@ import { jobQueue } from '../services/jobQueue'
 
 const router = Router()
 
+router.get('/', (_req: Request, res: Response) => {
+  const channels = getDb().prepare(
+    `SELECT id, youtube_channel_id, name, thumbnail_url FROM channels ORDER BY name ASC`
+  ).all()
+  res.json({ channels })
+})
+
 router.post('/:id/sync', (req: Request, res: Response) => {
   const channelId = Number(req.params.id)
   if (!Number.isInteger(channelId)) {

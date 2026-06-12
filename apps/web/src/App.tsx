@@ -1,12 +1,14 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import AddVideoPage from './pages/AddVideoPage'
 import VideoDetailPage from './pages/VideoDetailPage'
+import SearchPage from './pages/SearchPage'
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<AddVideoPage />} />
+        <Route path="/search" element={<SearchPage />} />
         <Route path="/videos/:youtubeVideoId" element={<VideoDetailPage />} />
       </Routes>
     </BrowserRouter>

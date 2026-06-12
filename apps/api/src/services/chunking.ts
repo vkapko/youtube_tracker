@@ -46,7 +46,7 @@ function toChunk(sentences: Sentence[], chunkIndex: number): TranscriptChunk {
   return {
     chunkIndex,
     text: sentences.map(sentence => sentence.text).join(' '),
-    startSeconds: sentences[0]?.startSeconds,
+    startSeconds: sentences[0]?.startSeconds ?? 0,
     endSeconds: timestamps.at(-1),
     tokenCount: sentences.reduce((total, sentence) => total + sentence.tokenCount, 0),
   }
