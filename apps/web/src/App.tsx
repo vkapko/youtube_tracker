@@ -3,6 +3,8 @@ import AddVideoPage from './pages/AddVideoPage'
 import VideoDetailPage from './pages/VideoDetailPage'
 import SearchPage from './pages/SearchPage'
 import ChatPage from './pages/ChatPage'
+import ChannelsPage from './pages/ChannelsPage'
+import ChannelDetailPage from './pages/ChannelDetailPage'
 
 export default function App() {
   return (
@@ -11,6 +13,8 @@ export default function App() {
         <Route path="/" element={<AddVideoPage />} />
         <Route path="/search" element={<SearchPage />} />
         <Route path="/chat" element={<ChatPage />} />
+        <Route path="/channels" element={<ChannelsPage />} />
+        <Route path="/channels/:channelId" element={<ChannelDetailPage />} />
         <Route path="/videos/:youtubeVideoId" element={<VideoDetailPage />} />
       </Routes>
     </BrowserRouter>

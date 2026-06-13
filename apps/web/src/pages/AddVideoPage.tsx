@@ -108,8 +108,9 @@ export default function AddVideoPage() {
 
   return (
     <div style={{ maxWidth: 600, margin: '2rem auto', padding: '0 1rem' }}>
-      <nav style={{ marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+      <nav style={{ marginBottom: '1.5rem', fontSize: '0.9rem', display: 'flex', gap: '1rem' }}>
         <Link to="/search" style={{ color: '#1a73e8' }}>Search</Link>
+        <Link to="/channels" style={{ color: '#1a73e8' }}>Channels</Link>
       </nav>
       <h1>Add Video</h1>
       <form onSubmit={handleSubmit}>
