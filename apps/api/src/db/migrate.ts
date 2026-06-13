@@ -9,7 +9,7 @@ export function runMigration(db: Database.Database): void {
       handle              TEXT,
       description         TEXT,
       thumbnail_url       TEXT,
-      last_synced_at      TEXT,
+      last_checked_at     TEXT,
       created_at          TEXT    NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -74,6 +74,12 @@ export function runMigration(db: Database.Database): void {
   const hasNew = cols.some(c => c.name === 'transcript_file_path')
   if (hasOld && !hasNew) {
     db.exec(`ALTER TABLE videos RENAME COLUMN transcript_path TO transcript_file_path`)
+  }
+
+  // Rename last_synced_at → last_checked_at (databases created before #010 used the old name)
+  const channelCols = db.pragma('table_info(channels)') as Array<{ name: string }>
+  if (channelCols.some(c => c.name === 'last_synced_at') && !channelCols.some(c => c.name === 'last_checked_at')) {
+    db.exec(`ALTER TABLE channels RENAME COLUMN last_synced_at TO last_checked_at`)
   }
 
   const chunkCols = db.pragma('table_info(transcript_chunks)') as Array<{ name: string }>

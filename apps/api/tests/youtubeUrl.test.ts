@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { parseYouTubeVideoId } from '../src/lib/youtubeUrl'
+import { parseYouTubeVideoId, parseYouTubeChannelInput } from '../src/lib/youtubeUrl'
 
 const ID = 'dQw4w9WgXcQ'
 
@@ -46,5 +46,42 @@ describe('parseYouTubeVideoId', () => {
 
   it('returns null for YouTube channel URL', () => {
     expect(parseYouTubeVideoId('https://www.youtube.com/channel/UCxxxxxx')).toBeNull()
+  })
+})
+
+describe('parseYouTubeChannelInput', () => {
+  it('parses bare @handle', () => {
+    expect(parseYouTubeChannelInput('@mkbhd')).toEqual({ type: 'handle', value: 'mkbhd' })
+  })
+
+  it('parses youtube.com/@handle URL', () => {
+    expect(parseYouTubeChannelInput('https://www.youtube.com/@mkbhd')).toEqual({ type: 'handle', value: 'mkbhd' })
+  })
+
+  it('parses /channel/UCxxx URL to id type', () => {
+    expect(parseYouTubeChannelInput('https://www.youtube.com/channel/UCBcRF18a7Qf58cMAttLomGg')).toEqual({
+      type: 'id',
+      value: 'UCBcRF18a7Qf58cMAttLomGg',
+    })
+  })
+
+  it('parses /c/name URL as customUrl type', () => {
+    expect(parseYouTubeChannelInput('https://www.youtube.com/c/mkbhd')).toEqual({ type: 'customUrl', value: 'mkbhd' })
+  })
+
+  it('strips trailing slash from handle URL', () => {
+    expect(parseYouTubeChannelInput('https://www.youtube.com/@mkbhd/')).toEqual({ type: 'handle', value: 'mkbhd' })
+  })
+
+  it('returns null for non-YouTube URL', () => {
+    expect(parseYouTubeChannelInput('https://vimeo.com/@someone')).toBeNull()
+  })
+
+  it('returns null for empty string', () => {
+    expect(parseYouTubeChannelInput('')).toBeNull()
+  })
+
+  it('returns null for a YouTube video URL', () => {
+    expect(parseYouTubeChannelInput('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toBeNull()
   })
 })

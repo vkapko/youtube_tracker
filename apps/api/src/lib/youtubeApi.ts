@@ -1,3 +1,97 @@
+export interface ChannelMetadata {
+  youtubeChannelId: string
+  title: string
+  handle: string | null
+  thumbnailUrl: string
+}
+
+export class ChannelNotFoundError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ChannelNotFoundError'
+  }
+}
+
+export async function resolveChannel(input: { type: 'handle' | 'id' | 'customUrl'; value: string }): Promise<ChannelMetadata> {
+  const apiKey = process.env.YOUTUBE_API_KEY
+  if (!apiKey) throw new Error('YOUTUBE_API_KEY is not set')
+
+  let params: string[]
+  if (input.type === 'id') {
+    params = [`id=${input.value}`]
+  } else if (input.type === 'handle') {
+    params = [`forHandle=${encodeURIComponent(input.value)}`]
+  } else {
+    // Legacy /c/ custom URL: the API has no direct lookup. Try forHandle (works when slug ==
+    // handle) then forUsername (covers the old /user/ namespace that many /c/ slugs map to).
+    params = [
+      `forHandle=${encodeURIComponent(input.value)}`,
+      `forUsername=${encodeURIComponent(input.value)}`,
+    ]
+  }
+
+  type ChannelItem = { id: string; snippet: { title: string; customUrl?: string; thumbnails: Record<string, { url: string }> } }
+  type ChannelResponse = { items?: ChannelItem[] }
+
+  let item: ChannelItem | undefined
+  for (const param of params) {
+    item = await fetchChannelItem(param, apiKey)
+    if (item) break
+  }
+
+  if (!item && input.type === 'customUrl') {
+    const channelId = await resolveLegacyCustomUrl(input.value)
+    if (channelId) item = await fetchChannelItem(`id=${channelId}`, apiKey)
+  }
+
+  if (!item) {
+    if (input.type === 'customUrl') {
+      throw new ChannelNotFoundError(
+        `Could not resolve legacy custom URL "/c/${input.value}". ` +
+          `Try using the channel's @handle URL (e.g. https://youtube.com/@${input.value}) instead.`
+      )
+    }
+    throw new ChannelNotFoundError(`No channel found for: ${input.value}`)
+  }
+
+  const { snippet } = item
+  const thumbnailUrl =
+    snippet.thumbnails.high?.url ?? snippet.thumbnails.default?.url ?? ''
+  const handle = snippet.customUrl ? snippet.customUrl.replace(/^@/, '') : null
+
+  return { youtubeChannelId: item.id, title: snippet.title, handle, thumbnailUrl }
+
+  async function fetchChannelItem(param: string, key: string): Promise<ChannelItem | undefined> {
+    const url = `https://www.googleapis.com/youtube/v3/channels?part=snippet&${param}&key=${key}`
+    const response = await fetch(url)
+    if (!response.ok) throw new Error(`YouTube API responded with ${response.status}`)
+    const data = (await response.json()) as ChannelResponse
+    return data.items?.[0]
+  }
+}
+
+async function resolveLegacyCustomUrl(slug: string): Promise<string | null> {
+  const response = await fetch(`https://www.youtube.com/c/${encodeURIComponent(slug)}`)
+  if (!response.ok) return null
+
+  const redirectedId = new URL(response.url).pathname.match(/^\/channel\/(UC[A-Za-z0-9_-]{22})\/?$/)?.[1]
+  if (redirectedId) return redirectedId
+
+  const html = await response.text()
+  const patterns = [
+    /itemprop=["']channelId["'][^>]*content=["'](UC[A-Za-z0-9_-]{22})["']/,
+    /content=["'](UC[A-Za-z0-9_-]{22})["'][^>]*itemprop=["']channelId["']/,
+    /["'](?:externalId|channelId)["']\s*:\s*["'](UC[A-Za-z0-9_-]{22})["']/,
+    /\/channel\/(UC[A-Za-z0-9_-]{22})/,
+  ]
+
+  for (const pattern of patterns) {
+    const match = html.match(pattern)
+    if (match) return match[1]
+  }
+  return null
+}
+
 export interface VideoMetadata {
   youtubeVideoId: string
   channelId: string
@@ -63,7 +157,7 @@ export interface ChannelVideoRef {
   publishedAt: string
 }
 
-export async function fetchChannelRecentVideoIds(channelId: string, maxResults = 50): Promise<ChannelVideoRef[]> {
+export async function fetchChannelRecentVideoIds(channelId: string, maxTotal = Infinity): Promise<ChannelVideoRef[]> {
   const apiKey = process.env.YOUTUBE_API_KEY
   if (!apiKey) throw new Error('YOUTUBE_API_KEY is not set')
 
@@ -78,19 +172,40 @@ export async function fetchChannelRecentVideoIds(channelId: string, maxResults =
   const uploadsPlaylistId = channelData.items?.[0]?.contentDetails?.relatedPlaylists?.uploads
   if (!uploadsPlaylistId) throw new Error(`No uploads playlist found for channel: ${channelId}`)
 
-  const playlistRes = await fetch(
-    `https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId=${uploadsPlaylistId}&maxResults=${maxResults}&key=${apiKey}`
-  )
-  if (!playlistRes.ok) throw new Error(`YouTube API responded with ${playlistRes.status}`)
+  const results: ChannelVideoRef[] = []
+  let pageToken: string | undefined
 
-  const playlistData = await playlistRes.json() as {
-    items?: Array<{ snippet: { publishedAt: string; resourceId: { videoId: string } } }>
-  }
+  do {
+    const pageSize = Math.min(50, isFinite(maxTotal) ? maxTotal - results.length : 50)
+    const params = new URLSearchParams({
+      part: 'snippet',
+      playlistId: uploadsPlaylistId,
+      maxResults: String(pageSize),
+      key: apiKey,
+    })
+    if (pageToken) params.set('pageToken', pageToken)
 
-  return (playlistData.items ?? []).map(item => ({
-    videoId: item.snippet.resourceId.videoId,
-    publishedAt: item.snippet.publishedAt,
-  }))
+    const playlistRes = await fetch(
+      `https://www.googleapis.com/youtube/v3/playlistItems?${params}`
+    )
+    if (!playlistRes.ok) throw new Error(`YouTube API responded with ${playlistRes.status}`)
+
+    const playlistData = await playlistRes.json() as {
+      nextPageToken?: string
+      items?: Array<{ snippet: { publishedAt: string; resourceId: { videoId: string } } }>
+    }
+
+    for (const item of playlistData.items ?? []) {
+      results.push({
+        videoId: item.snippet.resourceId.videoId,
+        publishedAt: item.snippet.publishedAt,
+      })
+    }
+
+    pageToken = playlistData.nextPageToken
+  } while (pageToken && results.length < maxTotal)
+
+  return results
 }
 
 function parseDuration(iso: string): number {

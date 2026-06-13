@@ -16,16 +16,22 @@ export function createChannelSyncWorker() {
         .map(r => r.youtube_video_id)
     )
 
+    const inFlight = new Set(
+      (db.prepare(
+        `SELECT json_extract(payload, '$.youtubeVideoId') AS vid FROM ingestion_jobs WHERE type = 'ingest_video' AND status IN ('queued', 'running')`
+      ).all() as Array<{ vid: string }>).map(r => r.vid)
+    )
+
     let enqueued = 0
     for (const { videoId } of videos) {
-      if (existing.has(videoId)) continue
+      if (existing.has(videoId) || inFlight.has(videoId)) continue
       const jobId = jobQueue.createJob('ingest_video', { youtubeVideoId: videoId })
       jobQueue.enqueue(jobId)
       enqueued++
     }
 
     db.prepare(
-      `UPDATE channels SET last_synced_at = datetime('now') WHERE youtube_channel_id = ?`
+      `UPDATE channels SET last_checked_at = datetime('now') WHERE youtube_channel_id = ?`
     ).run(youtubeChannelId)
 
     if (enqueued === 0) return
