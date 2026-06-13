@@ -8,3 +8,5 @@ apps/api/node_modules/.vite/
 data/
 .playwright-mcp/
 apps/api/python/.venv/
+__pycache__/
+*.pyc
