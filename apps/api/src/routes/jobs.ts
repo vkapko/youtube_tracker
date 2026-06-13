@@ -1,7 +1,29 @@
 import { Router, Request, Response } from 'express'
 import { getDb } from '../db/database'
+import { jobQueue } from '../services/jobQueue'
 
 const router = Router()
+
+router.post('/:id/retry', (req: Request, res: Response) => {
+  const id = Number(req.params.id)
+  if (!Number.isInteger(id)) {
+    res.status(400).json({ error: 'Invalid job id' })
+    return
+  }
+
+  const failedJob = getDb().prepare(
+    `SELECT id, type, payload FROM ingestion_jobs WHERE id = ? AND status = 'failed'`,
+  ).get(id) as { id: number; type: string; payload: string } | undefined
+
+  if (!failedJob) {
+    res.status(404).json({ error: 'Failed job not found' })
+    return
+  }
+
+  const jobId = jobQueue.createJob(failedJob.type, JSON.parse(failedJob.payload) as object)
+  jobQueue.enqueue(jobId)
+  res.status(202).json({ jobId, originalJobId: failedJob.id })
+})
 
 router.get('/:id', (req: Request, res: Response) => {
   const id = Number(req.params.id)

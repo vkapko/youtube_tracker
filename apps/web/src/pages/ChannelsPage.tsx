@@ -134,6 +134,7 @@ export default function ChannelsPage() {
   return (
     <div style={{ maxWidth: 700, margin: '2rem auto', padding: '0 1rem' }}>
       <nav style={{ marginBottom: '1.5rem', fontSize: '0.9rem', display: 'flex', gap: '1rem' }}>
+        <Link to="/dashboard" style={{ color: '#1a73e8' }}>Dashboard</Link>
         <Link to="/" style={{ color: '#1a73e8' }}>Add Video</Link>
         <Link to="/search" style={{ color: '#1a73e8' }}>Search</Link>
         <Link to="/chat" style={{ color: '#1a73e8' }}>Chat</Link>

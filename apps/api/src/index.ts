@@ -6,6 +6,7 @@ import { createIngestVideoWorker } from './services/ingestWorker'
 import { createChannelSyncWorker } from './services/channelSyncWorker'
 import { migratePublishedAtIfNeeded } from './services/reindex'
 import { ClaudeService } from './services/claude.service'
+import { startChannelSyncScheduler } from './services/channelSyncScheduler'
 
 const PORT = process.env.PORT ?? '3001'
 
@@ -22,6 +23,7 @@ const PORT = process.env.PORT ?? '3001'
   })
   setJobQueue(queue)
   queue.rehydrate()
+  startChannelSyncScheduler(queue)
 
   app.listen(Number(PORT), () => {
     console.log(`API listening on port ${PORT}`)

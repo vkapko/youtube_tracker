@@ -278,6 +278,7 @@ export default function ChatPage() {
         <div style={{ padding: '1rem 0 0.5rem', borderBottom: '1px solid #eee', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', marginBottom: '0.5rem' }}>
             <h1 style={{ margin: 0, fontSize: '1.25rem' }}>Chat</h1>
+            <a href="/dashboard" style={{ fontSize: '0.85rem', color: '#1a73e8' }}>Dashboard</a>
             <a href="/search" style={{ fontSize: '0.85rem', color: '#1a73e8' }}>Search</a>
             <a href="/" style={{ fontSize: '0.85rem', color: '#1a73e8' }}>Add Video</a>
           </div>

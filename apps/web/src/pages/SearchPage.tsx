@@ -137,7 +137,8 @@ export default function SearchPage() {
 
   return (
     <div style={{ maxWidth: 800, margin: '2rem auto', padding: '0 1rem' }}>
-      <nav style={{ marginBottom: '1.5rem', fontSize: '0.9rem' }}>
+      <nav style={{ marginBottom: '1.5rem', fontSize: '0.9rem', display: 'flex', gap: '1rem' }}>
+        <Link to="/dashboard" style={{ color: '#1a73e8' }}>Dashboard</Link>
         <Link to="/" style={{ color: '#1a73e8' }}>Add Video</Link>
       </nav>
 

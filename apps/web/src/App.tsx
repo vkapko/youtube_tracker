@@ -5,6 +5,7 @@ import SearchPage from './pages/SearchPage'
 import ChatPage from './pages/ChatPage'
 import ChannelsPage from './pages/ChannelsPage'
 import ChannelDetailPage from './pages/ChannelDetailPage'
+import DashboardPage from './pages/DashboardPage'
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
         <Route path="/channels" element={<ChannelsPage />} />
         <Route path="/channels/:channelId" element={<ChannelDetailPage />} />
         <Route path="/videos/:youtubeVideoId" element={<VideoDetailPage />} />
+        <Route path="/dashboard" element={<DashboardPage />} />
       </Routes>
     </BrowserRouter>
   )
