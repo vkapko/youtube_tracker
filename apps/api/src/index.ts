@@ -1,4 +1,6 @@
-import 'dotenv/config'
+import { config } from 'dotenv'
+import { resolve } from 'path'
+config({ path: resolve(__dirname, '../../../.env') })
 import app from './app'
 import { getDb } from './db/database'
 import { JobQueue, setJobQueue } from './services/jobQueue'

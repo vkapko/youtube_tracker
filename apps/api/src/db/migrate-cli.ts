@@ -1,4 +1,6 @@
-import 'dotenv/config'
+import { config } from 'dotenv'
+import { resolve } from 'path'
+config({ path: resolve(__dirname, '../../../../.env') })
 import BetterSqlite3 from 'better-sqlite3'
 import path from 'path'
 import fs from 'fs'
