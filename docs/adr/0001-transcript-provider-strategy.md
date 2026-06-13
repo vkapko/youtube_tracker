@@ -1,7 +1,7 @@
 # ADR 0001 — Transcript Acquisition Strategy
 
 ## Status
-Accepted
+Superseded by ADR 0006
 
 ## Context
 The official YouTube Data API does not allow downloading captions for arbitrary public videos. At medium scale (1K–5K videos), manual-only transcript input is not viable. Multiple community strategies exist with different reliability, legality, and maintenance profiles.

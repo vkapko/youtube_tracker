@@ -12,10 +12,13 @@ A YouTube channel being tracked. Identified by `youtube_channel_id`. The app pol
 A YouTube video ingested into the system. Identified by `youtube_video_id` (the canonical key — used for deduplication via UNIQUE constraint). Stores metadata, transcript status, and summary status.
 
 **Transcript**
-The full text of a video's spoken content, stored as a `.txt` file on disk. Source is either `youtube-transcript` (community library) or manual paste. Timestamps are preserved per segment when available.
+The full text of a video's spoken content, stored as a `.txt` file on disk. Its source is either an extractor or manual input. Timestamps are preserved per segment when available.
 
 **TranscriptProvider**
-The interface that abstracts transcript acquisition. Primary implementation: `youtube-transcript` library. Fallback: manual paste/upload. Other implementations (yt-dlp, Whisper) can be added without touching the pipeline.
+The boundary that abstracts Transcript acquisition. The configured extractor is selected explicitly; manual paste/upload remains a separate source when extraction cannot produce a usable Transcript.
+
+**Transcript Acquisition Policy**
+The ordered preferred languages and caption-selection rules that determine whether a Video has a usable Transcript. A Transcript is unavailable when no native caption track satisfies this policy.
 
 **Transcript Segment**
 One raw unit returned by the transcript provider — typically 1–5 seconds, 5–15 words, with a start timestamp. Segments are accumulated into Chunks.
@@ -43,8 +46,8 @@ The process of fetching a channel's recent uploads and ingesting any video whose
 
 **Transcript Status**
 One of: `pending` | `available` | `unavailable` | `failed`.
-- `unavailable` — set immediately when YouTube API reports `hasCaptions = false`. No extraction attempted.
-- `failed` — set when extraction threw unexpectedly. Retried once on the next sync.
+- `unavailable` — no usable Transcript exists under the configured acquisition policy, either because captions are absent or no caption track matches the preferred languages. Not retried automatically.
+- `failed` — Transcript acquisition did not complete. Retryable failures may be retried explicitly; Channel Sync does not retry existing Videos.
 - `available` — transcript successfully retrieved and stored.
 - `pending` — not yet attempted.
 
@@ -53,3 +56,9 @@ The set of channels a Chat or Search query is restricted to. Defaults to the use
 
 **Reindex**
 A CLI command (`npm run reindex`) that rebuilds the Chroma collection from SQLite chunks + transcript files. Used to recover from Chroma/SQLite drift during local development.
+
+## Example Dialogue
+
+**Developer:** The Video has captions. Why is its Transcript unavailable?
+
+**Domain expert:** None of its native caption tracks satisfy the Transcript Acquisition Policy. Channel Sync will not retry it automatically, but the user can provide a manual Transcript or explicitly retry after the policy changes.
