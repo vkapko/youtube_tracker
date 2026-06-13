@@ -21,6 +21,7 @@ vi.mock('../src/services/chroma', () => ({
 import { getDb } from '../src/db/database'
 import { JobQueue } from '../src/services/jobQueue'
 import { createIngestVideoWorker } from '../src/services/ingestWorker'
+import { YouTubeTranscriptProvider } from '../src/services/transcript'
 import * as youtubeApi from '../src/lib/youtubeApi'
 import * as ytLib from 'youtube-transcript'
 
@@ -93,7 +94,7 @@ describe('rehydrate()', () => {
     db.prepare(`INSERT INTO ingestion_jobs (type, status, payload) VALUES ('ingest_video', 'running', ?)`).run(payload)
     db.prepare(`INSERT INTO ingestion_jobs (type, status, payload) VALUES ('ingest_video', 'queued', ?)`).run(payload)
 
-    const q = new JobQueue({ ingest_video: createIngestVideoWorker(0) })
+    const q = new JobQueue({ ingest_video: createIngestVideoWorker(0, undefined, new YouTubeTranscriptProvider()) })
     q.rehydrate()
     await q.waitForIdle()
 
@@ -107,7 +108,7 @@ describe('rehydrate()', () => {
     db.prepare(`INSERT INTO ingestion_jobs (type, status, payload) VALUES ('ingest_video', 'completed', '{}')`).run()
     db.prepare(`INSERT INTO ingestion_jobs (type, status, payload) VALUES ('ingest_video', 'failed', '{}')`).run()
 
-    const q = new JobQueue({ ingest_video: createIngestVideoWorker(0) })
+    const q = new JobQueue({ ingest_video: createIngestVideoWorker(0, undefined, new YouTubeTranscriptProvider()) })
     q.rehydrate()
     await q.waitForIdle()
 

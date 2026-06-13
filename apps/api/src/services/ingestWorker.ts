@@ -1,12 +1,12 @@
 import PQueue from 'p-queue'
 import { fetchVideoMetadata } from '../lib/youtubeApi'
 import { getDb } from '../db/database'
-import { YouTubeTranscriptProvider } from './transcript'
-import type { TranscriptResult } from './transcript'
+import type { TranscriptProvider, TranscriptResult } from './transcript'
 import { saveTranscript, readTranscript } from './transcriptFile'
 import { TranscriptIndexer } from './transcriptIndexing'
 import type { ClaudeService } from './claude.service'
 import type { JobRow } from './jobQueue'
+import { PythonTranscriptError } from './pythonTranscriptProvider'
 
 // Shared across all concurrent ingest jobs — enforces at most one YouTube transcript
 // request in flight at a time, with a configurable delay between requests.
@@ -14,7 +14,8 @@ const transcriptRateLimiter = new PQueue({ concurrency: 1 })
 
 export function createIngestVideoWorker(
   transcriptFetchDelayMs = 1000,
-  claudeService?: Pick<ClaudeService, 'summarizeVideo'>
+  claudeService?: Pick<ClaudeService, 'summarizeVideo'>,
+  transcriptProvider?: TranscriptProvider,
 ) {
   return async function ingestVideoWorker(job: JobRow, setStage: (s: string) => void): Promise<void> {
     const { youtubeVideoId: videoId } = JSON.parse(job.payload) as { youtubeVideoId: string }
@@ -98,8 +99,18 @@ export function createIngestVideoWorker(
         await new Promise(r => setTimeout(r, transcriptFetchDelayMs))
       }
       try {
-        const provider = new YouTubeTranscriptProvider()
-        transcriptResult = await provider.getTranscript(videoId)
+        if (!transcriptProvider) throw new Error('transcriptProvider is required — pass it to createIngestVideoWorker()')
+        const provider = transcriptProvider
+        const acquisition = await provider.getTranscript(videoId)
+
+        if (acquisition.status === 'unavailable') {
+          db.prepare(
+            `UPDATE videos SET transcript_status = 'unavailable' WHERE youtube_video_id = ?`
+          ).run(videoId)
+          return
+        }
+
+        transcriptResult = acquisition.transcript
         transcriptPath = await saveTranscript({
           channelId: meta.channelId,
           videoId,
@@ -112,12 +123,20 @@ export function createIngestVideoWorker(
         db.prepare(
           `UPDATE videos SET transcript_status = 'failed' WHERE youtube_video_id = ?`
         ).run(videoId)
+        if (err instanceof PythonTranscriptError) {
+          db.prepare(
+            `UPDATE ingestion_jobs SET error_code = ?, retryable = ? WHERE id = ?`
+          ).run(err.code, err.retryable ? 1 : 0, job.id)
+        }
         throw err
       }
     })
 
+    // Provider returned unavailable — job complete, nothing to index
+    if (!transcriptResult) return
+
     setStage('indexing')
-    if (!transcriptResult || !transcriptPath) {
+    if (!transcriptPath) {
       throw new Error('Transcript indexing data was not produced')
     }
     try {

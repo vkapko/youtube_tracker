@@ -57,6 +57,8 @@ export function runMigration(db: Database.Database): void {
       stage          TEXT,
       payload        TEXT    NOT NULL,
       error_message  TEXT,
+      error_code     TEXT,
+      retryable      INTEGER,
       created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
       updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
     );
@@ -88,5 +90,13 @@ export function runMigration(db: Database.Database): void {
   }
   if (!chunkCols.some(c => c.name === 'end_timestamp_seconds')) {
     db.exec(`ALTER TABLE transcript_chunks ADD COLUMN end_timestamp_seconds REAL`)
+  }
+
+  const jobColNames = (db.pragma('table_info(ingestion_jobs)') as Array<{ name: string }>).map(c => c.name)
+  if (!jobColNames.includes('error_code')) {
+    db.exec(`ALTER TABLE ingestion_jobs ADD COLUMN error_code TEXT`)
+  }
+  if (!jobColNames.includes('retryable')) {
+    db.exec(`ALTER TABLE ingestion_jobs ADD COLUMN retryable INTEGER`)
   }
 }

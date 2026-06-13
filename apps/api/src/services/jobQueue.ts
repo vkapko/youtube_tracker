@@ -10,6 +10,8 @@ export interface JobRow {
   stage: string | null
   payload: string
   error_message: string | null
+  error_code: string | null
+  retryable: number | null
 }
 
 type SetStage = (stage: string) => void

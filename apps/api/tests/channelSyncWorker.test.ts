@@ -42,6 +42,8 @@ function makeJobRow(youtubeChannelId: string): JobRow {
     stage: null,
     payload: JSON.stringify({ youtubeChannelId }),
     error_message: null,
+    error_code: null,
+    retryable: null,
   }
 }
 

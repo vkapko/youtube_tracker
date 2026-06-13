@@ -112,6 +112,34 @@ describe('parseTranscriptFile round-trip', () => {
     ])
   })
 
+  it('omits durationSeconds from the .txt file even when segments carry it in memory', async () => {
+    const result: TranscriptResult = {
+      videoId: 'dQw4w9WgXcQ',
+      source: 'extractor',
+      segments: [
+        { startSeconds: 0, durationSeconds: 2.5, text: 'Hello' },
+        { startSeconds: 3.0, durationSeconds: 1.8, text: 'World' },
+      ],
+      plainText: 'Hello World',
+    }
+    const filePath = await saveTranscript({
+      channelId: 'UCabc123',
+      videoId: 'dQw4w9WgXcQ',
+      title: 'Test',
+      channelName: 'Tester',
+      publishedAt: '2024-01-01',
+      result,
+      dataDir: tmpDir,
+    })
+    const content = await fs.readFile(filePath, 'utf8')
+    const segments = parseTranscriptFile(content)
+    expect(segments).toEqual([
+      { startSeconds: 0, text: 'Hello' },
+      { startSeconds: 3, text: 'World' },
+    ])
+    expect(segments.every(s => !('durationSeconds' in s))).toBe(true)
+  })
+
   it('parses manual (no-timestamp) segments written by saveTranscript', async () => {
     const result: TranscriptResult = {
       videoId: 'dQw4w9WgXcQ',

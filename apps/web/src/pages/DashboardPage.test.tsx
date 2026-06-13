@@ -24,7 +24,24 @@ const dashboard = {
       type: 'ingest_video',
       payload: { youtubeVideoId: 'failed-video' },
       errorMessage: 'Transcript unavailable',
+      errorCode: null,
+      retryable: null,
       failedAt: '2026-06-13 11:00:00',
+    },
+  ],
+}
+
+const nonRetryableDashboard = {
+  ...dashboard,
+  recentlyFailedJobs: [
+    {
+      id: 42,
+      type: 'ingest_video',
+      payload: { youtubeVideoId: 'blocked' },
+      errorMessage: 'Missing Python dependency',
+      errorCode: 'dependency_error',
+      retryable: false,
+      failedAt: '2026-06-13 10:00:00',
     },
   ],
 }
@@ -109,5 +126,93 @@ describe('DashboardPage', () => {
       expect(fetchMock).toHaveBeenCalledWith('/api/jobs/17/retry', { method: 'POST' })
       expect(fetchMock.mock.calls.filter(([url]) => url === '/api/dashboard')).toHaveLength(2)
     })
+  })
+
+  it('disables the retry button and shows force retry for non-retryable jobs', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(nonRetryableDashboard),
+    }))
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => screen.getByRole('button', { name: /^retry$/i }))
+
+    expect((screen.getByRole('button', { name: /^retry$/i }) as HTMLButtonElement).disabled).toBe(true)
+    expect(screen.getByRole('button', { name: /force retry/i })).toBeTruthy()
+  })
+
+  it('shows the error code for non-retryable jobs', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(nonRetryableDashboard),
+    }))
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => screen.getByText('Error code: dependency_error'))
+  })
+
+  it('calls the API with force=true when force retry is confirmed', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+      if (url === '/api/jobs/42/retry' && init?.method === 'POST') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ jobId: 43, originalJobId: 42 }),
+        })
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(nonRetryableDashboard),
+      })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(true))
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => screen.getByRole('button', { name: /force retry/i }))
+    fireEvent.click(screen.getByRole('button', { name: /force retry/i }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/jobs/42/retry', expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ force: true }),
+      }))
+    })
+  })
+
+  it('does not call the API when force retry confirmation is cancelled', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(nonRetryableDashboard),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.stubGlobal('confirm', vi.fn().mockReturnValue(false))
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => screen.getByRole('button', { name: /force retry/i }))
+    const callsBefore = fetchMock.mock.calls.length
+
+    fireEvent.click(screen.getByRole('button', { name: /force retry/i }))
+
+    expect(fetchMock).toHaveBeenCalledTimes(callsBefore)
   })
 })

@@ -13,5 +13,5 @@
 | [009](docs/issues/009-streaming-rag-chat.md) | Streaming RAG chat | ✅ Done |
 | [010](docs/issues/010-channel-tracking.md) | Channel tracking | ✅ Done |
 | [011](docs/issues/011-auto-sync-and-dashboard.md) | Automatic channel sync + Dashboard | ✅ Done |
-| [012](docs/issues/012-python-transcript-provider.md) | Python transcript provider | Needs triage |
-| [013](docs/issues/013-transcript-error-tracking.md) | Transcript error tracking and retry observability | Needs triage |
+| [012](docs/issues/012-python-transcript-provider.md) | Python transcript provider | ✅ Done |
+| [013](docs/issues/013-transcript-error-tracking.md) | Transcript error tracking and retry observability | ✅ Done |

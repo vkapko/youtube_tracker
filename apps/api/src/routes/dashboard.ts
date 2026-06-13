@@ -19,6 +19,8 @@ interface FailedJobRow {
   type: string
   payload: string
   error_message: string | null
+  error_code: string | null
+  retryable: number | null
   updated_at: string
 }
 
@@ -52,7 +54,7 @@ router.get('/', (_req, res) => {
   `).all() as RecentVideoRow[]
 
   const recentlyFailedJobs = db.prepare(`
-    SELECT id, type, payload, error_message, updated_at
+    SELECT id, type, payload, error_message, error_code, retryable, updated_at
     FROM ingestion_jobs
     WHERE status = 'failed'
     ORDER BY updated_at DESC, id DESC
@@ -77,6 +79,8 @@ router.get('/', (_req, res) => {
       type: job.type,
       payload: JSON.parse(job.payload) as object,
       errorMessage: job.error_message,
+      errorCode: job.error_code,
+      retryable: job.retryable === null ? null : job.retryable === 1,
       failedAt: job.updated_at,
     })),
   })

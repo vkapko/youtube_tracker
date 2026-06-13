@@ -31,7 +31,11 @@ router.post('/:youtubeVideoId/transcript', async (req: Request, res: Response) =
 
   try {
     const provider = new ManualTranscriptProvider(text)
-    const result = await provider.getTranscript(youtubeVideoId)
+    const acquisition = await provider.getTranscript(youtubeVideoId)
+    if (acquisition.status !== 'ok') {
+      throw new Error('Unexpected provider result')
+    }
+    const result = acquisition.transcript
 
     const transcriptPath = await saveTranscript({
       channelId: video.youtube_channel_id,

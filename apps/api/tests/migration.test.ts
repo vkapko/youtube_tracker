@@ -52,6 +52,73 @@ describe('runMigration — transcript chunk Chroma document id', () => {
   })
 })
 
+describe('runMigration — ingestion_jobs error metadata columns', () => {
+  it('creates error_code and retryable as nullable columns on a fresh database', () => {
+    const db = new BetterSqlite3(':memory:')
+    runMigration(db)
+    const cols = db.pragma('table_info(ingestion_jobs)') as Array<{ name: string; notnull: number }>
+    const errorCode = cols.find(c => c.name === 'error_code')
+    const retryable = cols.find(c => c.name === 'retryable')
+    expect(errorCode).toBeDefined()
+    expect(retryable).toBeDefined()
+    expect(errorCode!.notnull).toBe(0)
+    expect(retryable!.notnull).toBe(0)
+    db.close()
+  })
+
+  it('adds error_code and retryable to existing ingestion_jobs tables without them', () => {
+    const db = new BetterSqlite3(':memory:')
+    db.exec(`
+      CREATE TABLE ingestion_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        payload TEXT NOT NULL,
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `)
+
+    runMigration(db)
+
+    const cols = db.pragma('table_info(ingestion_jobs)') as Array<{ name: string }>
+    expect(cols.some(c => c.name === 'error_code')).toBe(true)
+    expect(cols.some(c => c.name === 'retryable')).toBe(true)
+    db.close()
+  })
+
+  it('does not affect existing rows when adding error_code and retryable', () => {
+    const db = new BetterSqlite3(':memory:')
+    db.exec(`
+      CREATE TABLE ingestion_jobs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        type TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        payload TEXT NOT NULL,
+        error_message TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `)
+    db.prepare(`INSERT INTO ingestion_jobs (type, status, payload) VALUES ('ingest_video', 'failed', '{}')`).run()
+
+    runMigration(db)
+
+    const row = db.prepare('SELECT error_code, retryable FROM ingestion_jobs').get() as any
+    expect(row.error_code).toBeNull()
+    expect(row.retryable).toBeNull()
+    db.close()
+  })
+
+  it('is idempotent when error_code and retryable already exist', () => {
+    const db = new BetterSqlite3(':memory:')
+    runMigration(db)
+    expect(() => runMigration(db)).not.toThrow()
+    db.close()
+  })
+})
+
 describe('runMigration — transcript_path column rename', () => {
   function legacyDb(): Database.Database {
     const db = new BetterSqlite3(':memory:')

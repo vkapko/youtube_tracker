@@ -1,5 +1,6 @@
 export interface TranscriptSegment {
   startSeconds?: number
+  durationSeconds?: number
   text: string
 }
 
@@ -8,27 +9,43 @@ export interface TranscriptResult {
   source: 'extractor' | 'manual'
   segments: TranscriptSegment[]
   plainText: string
+  languageCode?: string
+  languageName?: string
+  isGenerated?: boolean
 }
 
+export type UnavailableReason =
+  | 'transcripts_disabled'
+  | 'no_requested_transcript'
+  | 'empty_transcript'
+  | 'video_unavailable'
+
+export type TranscriptAcquisitionResult =
+  | { status: 'ok'; transcript: TranscriptResult }
+  | { status: 'unavailable'; reason: UnavailableReason }
+
 export interface TranscriptProvider {
-  getTranscript(videoId: string): Promise<TranscriptResult>
+  getTranscript(videoId: string): Promise<TranscriptAcquisitionResult>
 }
 
 export class ManualTranscriptProvider implements TranscriptProvider {
   constructor(private text: string) {}
 
-  async getTranscript(videoId: string): Promise<TranscriptResult> {
+  async getTranscript(videoId: string): Promise<TranscriptAcquisitionResult> {
     return {
-      videoId,
-      source: 'manual',
-      segments: [{ text: this.text }],
-      plainText: this.text,
+      status: 'ok',
+      transcript: {
+        videoId,
+        source: 'manual',
+        segments: [{ text: this.text }],
+        plainText: this.text,
+      },
     }
   }
 }
 
 export class YouTubeTranscriptProvider implements TranscriptProvider {
-  async getTranscript(videoId: string): Promise<TranscriptResult> {
+  async getTranscript(videoId: string): Promise<TranscriptAcquisitionResult> {
     const { YoutubeTranscript } = await import('youtube-transcript')
     const raw = await YoutubeTranscript.fetchTranscript(videoId)
     const segments: TranscriptSegment[] = raw.map(item => ({
@@ -36,10 +53,13 @@ export class YouTubeTranscriptProvider implements TranscriptProvider {
       text: item.text,
     }))
     return {
-      videoId,
-      source: 'extractor',
-      segments,
-      plainText: segments.map(s => s.text).join(' '),
+      status: 'ok',
+      transcript: {
+        videoId,
+        source: 'extractor',
+        segments,
+        plainText: segments.map(s => s.text).join(' '),
+      },
     }
   }
 }

@@ -12,11 +12,17 @@ router.post('/:id/retry', (req: Request, res: Response) => {
   }
 
   const failedJob = getDb().prepare(
-    `SELECT id, type, payload FROM ingestion_jobs WHERE id = ? AND status = 'failed'`,
-  ).get(id) as { id: number; type: string; payload: string } | undefined
+    `SELECT id, type, payload, retryable FROM ingestion_jobs WHERE id = ? AND status = 'failed'`,
+  ).get(id) as { id: number; type: string; payload: string; retryable: number | null } | undefined
 
   if (!failedJob) {
     res.status(404).json({ error: 'Failed job not found' })
+    return
+  }
+
+  const force = (req.body as { force?: boolean })?.force === true
+  if (failedJob.retryable === 0 && !force) {
+    res.status(409).json({ error: 'Job is not retryable. Set force: true to override after correcting the environment.' })
     return
   }
 
@@ -33,7 +39,7 @@ router.get('/:id', (req: Request, res: Response) => {
   }
 
   const job = getDb().prepare(
-    'SELECT id, type, status, stage, error_message, payload FROM ingestion_jobs WHERE id = ?'
+    'SELECT id, type, status, stage, error_message, error_code, retryable, payload FROM ingestion_jobs WHERE id = ?'
   ).get(id)
 
   if (!job) {

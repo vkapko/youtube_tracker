@@ -38,6 +38,7 @@ import * as youtubeApi from '../src/lib/youtubeApi'
 import * as ytLib from 'youtube-transcript'
 import { jobQueue, setJobQueue, JobQueue } from '../src/services/jobQueue'
 import { createIngestVideoWorker } from '../src/services/ingestWorker'
+import { YouTubeTranscriptProvider } from '../src/services/transcript'
 import type { JobRow } from '../src/services/jobQueue'
 
 const baseMeta = {
@@ -57,7 +58,7 @@ describe('POST /api/videos/ingest', () => {
   const mockFetchTranscript = vi.mocked(ytLib.YoutubeTranscript.fetchTranscript)
 
   beforeEach(() => {
-    setJobQueue(new JobQueue({ ingest_video: createIngestVideoWorker(0) }))
+    setJobQueue(new JobQueue({ ingest_video: createIngestVideoWorker(0, undefined, new YouTubeTranscriptProvider()) }))
     const db = getDb()
     db.prepare('DELETE FROM ingestion_jobs').run()
     db.prepare('DELETE FROM transcript_chunks').run()
@@ -247,9 +248,11 @@ describe('ingest progress stages', () => {
       stage: null,
       payload: JSON.stringify({ youtubeVideoId: baseMeta.youtubeVideoId }),
       error_message: null,
+      error_code: null,
+      retryable: null,
     }
 
-    await createIngestVideoWorker(0)(job, stage => stages.push(stage))
+    await createIngestVideoWorker(0, undefined, new YouTubeTranscriptProvider())(job, stage => stages.push(stage))
 
     expect(stages).toEqual([
       'fetching_metadata',

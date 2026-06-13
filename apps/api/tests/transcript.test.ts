@@ -9,20 +9,24 @@ vi.mock('youtube-transcript', () => ({
 }))
 
 describe('ManualTranscriptProvider', () => {
-  it('returns a TranscriptResult with source manual and the input as plainText', async () => {
+  it('returns status ok with source manual and the input as plainText', async () => {
     const provider = new ManualTranscriptProvider('Hello world.\nSecond line.')
-    const result = await provider.getTranscript('abc123')
-    expect(result.videoId).toBe('abc123')
-    expect(result.source).toBe('manual')
-    expect(result.plainText).toBe('Hello world.\nSecond line.')
+    const acquisition = await provider.getTranscript('abc123')
+    expect(acquisition.status).toBe('ok')
+    if (acquisition.status !== 'ok') return
+    expect(acquisition.transcript.videoId).toBe('abc123')
+    expect(acquisition.transcript.source).toBe('manual')
+    expect(acquisition.transcript.plainText).toBe('Hello world.\nSecond line.')
   })
 
   it('produces a single segment with no timestamp', async () => {
     const provider = new ManualTranscriptProvider('Some text')
-    const result = await provider.getTranscript('vid1')
-    expect(result.segments).toHaveLength(1)
-    expect(result.segments[0].text).toBe('Some text')
-    expect(result.segments[0].startSeconds).toBeUndefined()
+    const acquisition = await provider.getTranscript('vid1')
+    expect(acquisition.status).toBe('ok')
+    if (acquisition.status !== 'ok') return
+    expect(acquisition.transcript.segments).toHaveLength(1)
+    expect(acquisition.transcript.segments[0].text).toBe('Some text')
+    expect(acquisition.transcript.segments[0].startSeconds).toBeUndefined()
   })
 })
 
@@ -35,14 +39,16 @@ describe('YouTubeTranscriptProvider', () => {
       { text: 'World', offset: 5000, duration: 3000 },
     ])
     const provider = new YouTubeTranscriptProvider()
-    const result = await provider.getTranscript('abc123')
-    expect(result.videoId).toBe('abc123')
-    expect(result.source).toBe('extractor')
-    expect(result.segments).toEqual([
+    const acquisition = await provider.getTranscript('abc123')
+    expect(acquisition.status).toBe('ok')
+    if (acquisition.status !== 'ok') return
+    expect(acquisition.transcript.videoId).toBe('abc123')
+    expect(acquisition.transcript.source).toBe('extractor')
+    expect(acquisition.transcript.segments).toEqual([
       { startSeconds: 0, text: 'Hello' },
       { startSeconds: 5, text: 'World' },
     ])
-    expect(result.plainText).toBe('Hello World')
+    expect(acquisition.transcript.plainText).toBe('Hello World')
   })
 
   it('rethrows unexpected errors from the library', async () => {

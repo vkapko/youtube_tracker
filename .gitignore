@@ -7,3 +7,4 @@ dist/
 apps/api/node_modules/.vite/
 data/
 .playwright-mcp/
+apps/api/python/.venv/

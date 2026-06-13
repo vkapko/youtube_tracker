@@ -80,4 +80,43 @@ describe('GET /api/dashboard', () => {
       type: 'ingest_video',
     })
   })
+
+  it('includes errorCode and retryable=false for non-retryable structured failures', async () => {
+    getDb().prepare(`
+      INSERT INTO ingestion_jobs (type, status, payload, error_message, error_code, retryable, updated_at)
+      VALUES ('ingest_video', 'failed', '{"youtubeVideoId":"dep-fail"}', 'Missing dep', 'dependency_error', 0, '2026-06-13 10:00:00')
+    `).run()
+
+    const response = await request(app).get('/api/dashboard')
+    expect(response.status).toBe(200)
+    const [failedJob] = response.body.recentlyFailedJobs
+    expect(failedJob.errorCode).toBe('dependency_error')
+    expect(failedJob.retryable).toBe(false)
+  })
+
+  it('includes errorCode and retryable=true for retryable structured failures', async () => {
+    getDb().prepare(`
+      INSERT INTO ingestion_jobs (type, status, payload, error_message, error_code, retryable, updated_at)
+      VALUES ('ingest_video', 'failed', '{"youtubeVideoId":"blocked"}', 'Blocked', 'request_blocked', 1, '2026-06-13 10:00:00')
+    `).run()
+
+    const response = await request(app).get('/api/dashboard')
+    expect(response.status).toBe(200)
+    const [failedJob] = response.body.recentlyFailedJobs
+    expect(failedJob.errorCode).toBe('request_blocked')
+    expect(failedJob.retryable).toBe(true)
+  })
+
+  it('includes null errorCode and retryable for unstructured failures', async () => {
+    getDb().prepare(`
+      INSERT INTO ingestion_jobs (type, status, payload, error_message, updated_at)
+      VALUES ('ingest_video', 'failed', '{"youtubeVideoId":"plain-fail"}', 'Unknown error', '2026-06-13 09:00:00')
+    `).run()
+
+    const response = await request(app).get('/api/dashboard')
+    expect(response.status).toBe(200)
+    const [failedJob] = response.body.recentlyFailedJobs
+    expect(failedJob.errorCode).toBeNull()
+    expect(failedJob.retryable).toBeNull()
+  })
 })

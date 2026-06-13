@@ -15,6 +15,8 @@ interface FailedJob {
   type: string
   payload: Record<string, unknown>
   errorMessage: string | null
+  errorCode: string | null
+  retryable: boolean | null
   failedAt: string
 }
 
@@ -55,10 +57,13 @@ export default function DashboardPage() {
     void loadDashboard()
   }, [loadDashboard])
 
-  async function retryJob(jobId: number) {
+  async function retryJob(jobId: number, force = false) {
     setRetryingJobIds(current => new Set(current).add(jobId))
     try {
-      const response = await fetch(`/api/jobs/${jobId}/retry`, { method: 'POST' })
+      const response = await fetch(`/api/jobs/${jobId}/retry`, {
+        method: 'POST',
+        ...(force ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ force: true }) } : {}),
+      })
       if (!response.ok) throw new Error('Failed to retry job')
       await loadDashboard()
     } catch {
@@ -69,6 +74,12 @@ export default function DashboardPage() {
         next.delete(jobId)
         return next
       })
+    }
+  }
+
+  function handleForceRetry(jobId: number) {
+    if (window.confirm('This failure is not automatically retryable. Force retry after correcting the environment?')) {
+      void retryJob(jobId, true)
     }
   }
 
@@ -133,13 +144,27 @@ export default function DashboardPage() {
         <div key={job.id} style={{ border: '1px solid #f0c7c7', borderRadius: 8, padding: '0.75rem', marginBottom: '0.6rem' }}>
           <div style={{ fontWeight: 600 }}>{job.type}</div>
           <p style={{ color: '#c62828', margin: '0.35rem 0' }}>{job.errorMessage ?? 'Ingestion failed'}</p>
-          <button
-            type="button"
-            onClick={() => void retryJob(job.id)}
-            disabled={retryingJobIds.has(job.id)}
-          >
-            {retryingJobIds.has(job.id) ? 'Retrying…' : 'Retry'}
-          </button>
+          {job.errorCode && (
+            <p style={{ color: '#888', fontSize: '0.8rem', margin: '0.25rem 0' }}>Error code: {job.errorCode}</p>
+          )}
+          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+            <button
+              type="button"
+              onClick={() => void retryJob(job.id)}
+              disabled={retryingJobIds.has(job.id) || job.retryable === false}
+            >
+              {retryingJobIds.has(job.id) ? 'Retrying…' : 'Retry'}
+            </button>
+            {job.retryable === false && (
+              <button
+                type="button"
+                onClick={() => handleForceRetry(job.id)}
+                disabled={retryingJobIds.has(job.id)}
+              >
+                Force retry
+              </button>
+            )}
+          </div>
         </div>
       ))}
     </div>
