@@ -89,6 +89,7 @@ export default function VideoDetailPage() {
   const [segments, setSegments] = useState<Segment[] | null>(null)
   const [summary, setSummary] = useState<Summary | null>(null)
   const [retrying, setRetrying] = useState(false)
+  const [reingesting, setReingesting] = useState(false)
   const [error, setError] = useState('')
 
   const [lazySummaries, setLazySummaries] = useState<Record<LazySummaryType, LazySummaryState>>(
@@ -130,6 +131,25 @@ export default function VideoDetailPage() {
     }
   }, [youtubeVideoId, retrying])
 
+  const reingest = useCallback(async () => {
+    if (!youtubeVideoId || reingesting) return
+    setReingesting(true)
+    try {
+      const r = await fetch('/api/videos/ingest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: `https://www.youtube.com/watch?v=${youtubeVideoId}` }),
+      })
+      if (r.ok) {
+        setVideo(prev => prev ? { ...prev, transcript_status: 'pending' } : prev)
+      }
+    } catch {
+      // ignore
+    } finally {
+      setReingesting(false)
+    }
+  }, [youtubeVideoId, reingesting])
+
   const fetchLazySummary = useCallback(async (type: LazySummaryType) => {
     if (!youtubeVideoId) return
     setLazySummaries(prev => ({ ...prev, [type]: { ...prev[type], loading: true } }))
@@ -166,6 +186,12 @@ export default function VideoDetailPage() {
   useEffect(() => { fetchSummary() }, [fetchSummary])
 
   useEffect(() => {
+    if (!video || video.transcript_status !== 'pending') return
+    const interval = setInterval(fetchVideo, 3000)
+    return () => clearInterval(interval)
+  }, [video?.transcript_status, fetchVideo])
+
+  useEffect(() => {
     if (!youtubeVideoId) return
     LAZY_SUMMARY_TYPES.forEach(type => {
       fetch(`/api/videos/${youtubeVideoId}/summary/${type}?cacheOnly=true`)
@@ -187,7 +213,8 @@ export default function VideoDetailPage() {
         if (data.segments) setSegments(data.segments)
       })
       .catch(() => {/* viewer simply won't render */})
-  }, [video])
+    fetchSummary()
+  }, [video?.transcript_status])
 
   if (error) return (
     <div style={{ maxWidth: 800, margin: '2rem auto', padding: '0 1rem' }}>
@@ -369,15 +396,22 @@ export default function VideoDetailPage() {
         {(video.transcript_status === 'unavailable' || video.transcript_status === 'failed') && (
           <div>
             {video.transcript_status === 'failed' && (
-              <p style={{ color: '#c62828', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                Automatic extraction failed. You can paste or upload a transcript manually.
+              <p style={{ color: '#c62828', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                Automatic extraction failed. You can re-ingest or paste a transcript manually.
               </p>
             )}
             {video.transcript_status === 'unavailable' && (
-              <p style={{ color: '#555', fontSize: '0.9rem', marginBottom: '1rem' }}>
-                No captions are available for this video. You can paste or upload a transcript manually.
+              <p style={{ color: '#555', fontSize: '0.9rem', marginBottom: '0.5rem' }}>
+                No captions were found. You can re-ingest or paste a transcript manually.
               </p>
             )}
+            <button
+              onClick={reingest}
+              disabled={reingesting}
+              style={{ ...(reingesting ? BTN_DISABLED_STYLE : BTN_STYLE), marginBottom: '1rem' }}
+            >
+              {reingesting ? 'Queuing…' : 'Re-ingest'}
+            </button>
             <ManualTranscriptForm
               videoId={video.youtube_video_id}
               onSaved={() => { setVideo(null); setSegments(null); fetchVideo(); fetchSummary() }}
