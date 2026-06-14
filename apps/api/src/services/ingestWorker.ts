@@ -54,10 +54,8 @@ export function createIngestVideoWorker(
       meta.publishedAt,
       meta.thumbnailUrl,
       meta.hasCaptions ? 1 : 0,
-      meta.hasCaptions ? 'pending' : 'unavailable',
+      'pending',
     ) as { id: number }
-
-    if (!meta.hasCaptions) return
 
     const existing = db.prepare(
       'SELECT transcript_status, transcript_file_path, summary_status FROM videos WHERE youtube_video_id = ?'

@@ -185,6 +185,23 @@ class TestSegmentNormalization:
         result = self._get_result([{"text": "it&#39;s &amp; that", "start": 0.0, "duration": 1.0}])
         assert result["segments"][0]["text"] == "it&#39;s &amp; that"
 
+    def test_newlines_in_segment_text_replaced_with_space(self):
+        """YouTube captions use \\n for display line-breaks; adapter normalises to space."""
+        result = self._get_result([{"text": "You know the rules\nand so do I", "start": 0.0, "duration": 3.0}])
+        assert result["segments"][0]["text"] == "You know the rules and so do I"
+
+    def test_carriage_returns_in_segment_text_replaced_with_space(self):
+        result = self._get_result([{"text": "line one\r\nline two", "start": 0.0, "duration": 3.0}])
+        assert result["segments"][0]["text"] == "line one line two"
+
+    def test_segment_with_only_newlines_after_normalization_is_discarded(self):
+        result = self._get_result([
+            {"text": "\n\n", "start": 0.0, "duration": 1.0},
+            {"text": "Real text", "start": 1.0, "duration": 1.0},
+        ])
+        assert len(result["segments"]) == 1
+        assert result["segments"][0]["text"] == "Real text"
+
     def test_multiple_segments_returned_in_order(self):
         result = self._get_result([
             {"text": "First", "start": 0.0, "duration": 1.0},

@@ -111,6 +111,8 @@ class TranscriptAdapter:
             else:
                 text, start, duration = seg.text, seg.start, seg.duration
 
+            text = text.replace('\r\n', ' ').replace('\r', ' ').replace('\n', ' ')
+
             if not text.strip():
                 continue
 
