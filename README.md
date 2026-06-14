@@ -20,6 +20,13 @@ A local-first personal knowledge base for YouTube channels. Add channels once; t
 
 ## Setup
 
+Shell scripts are provided for a one-command setup:
+
+- **macOS / Linux:** `./scripts/setup.sh`
+- **Windows (PowerShell):** `.\scripts\setup.ps1`
+
+Or run the steps manually:
+
 ```bash
 # 1. Install Node dependencies
 npm install
@@ -51,6 +58,26 @@ npm run dev:web
 ```
 
 The app runs at `http://localhost:5173`. The API runs at `http://localhost:4000`.
+
+## Running the app
+
+After setup, use these scripts to start everything:
+
+**macOS / Linux**
+
+```bash
+./scripts/dev.sh
+```
+
+Starts Chroma, the API, and the web server. `Ctrl+C` stops all three.
+
+**Windows (PowerShell)**
+
+```powershell
+.\scripts\dev.ps1
+```
+
+Starts Chroma and opens the API and web servers each in a separate terminal window.
 
 ## Environment variables
 
