@@ -13,6 +13,7 @@ A local-first personal knowledge base for YouTube channels. Add channels once; t
 ## Prerequisites
 
 - Node.js 20+
+- Python 3.12+
 - Docker (for Chroma)
 - YouTube Data API key
 - Anthropic API key
@@ -20,22 +21,32 @@ A local-first personal knowledge base for YouTube channels. Add channels once; t
 ## Setup
 
 ```bash
-# 1. Install dependencies
+# 1. Install Node dependencies
 npm install
 
-# 2. Copy env template and fill in your keys
+# 2. Install Python dependencies (for transcript extraction)
+cd apps/api/python
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
+pip install -r requirements.txt
+cd ../../..
+
+# 3. Copy env template and fill in your keys
 cp .env.example .env
 
-# 3. Start Chroma
+# 4. Start Chroma
 docker compose up -d
 
-# 4. Run database migrations
+# 5. Run database migrations
 npm run db:migrate
 
-# 5. Start the backend
+# 6. Start the backend
 npm run dev:api
 
-# 6. Start the frontend (separate terminal)
+# 7. Start the frontend (separate terminal)
 npm run dev:web
 ```
 
