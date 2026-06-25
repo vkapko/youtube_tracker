@@ -159,6 +159,22 @@ describe('PythonTranscriptProvider — thrown errors', () => {
     }
   })
 
+  it('falls back to errorCode when adapter error message is blank', async () => {
+    const runner = makeRunner({
+      exitCode: 1,
+      stdout: errorResponse('provider_error', true, { message: '' }),
+    })
+    const provider = new PythonTranscriptProvider(DEFAULT_CONFIG, runner)
+    try {
+      await provider.getTranscript('dQw4w9WgXcQ')
+    } catch (err) {
+      expect(err).toBeInstanceOf(PythonTranscriptError)
+      expect((err as PythonTranscriptError).message).toBe('provider_error')
+      expect((err as PythonTranscriptError).code).toBe('provider_error')
+      expect((err as PythonTranscriptError).retryable).toBe(true)
+    }
+  })
+
   it('throws PythonTranscriptError for dependency_error (non-retryable)', async () => {
     const runner = makeRunner({ exitCode: 1, stdout: errorResponse('dependency_error', false) })
     const provider = new PythonTranscriptProvider(DEFAULT_CONFIG, runner)

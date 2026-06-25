@@ -254,6 +254,33 @@ class TestErrorClassification:
         assert exc.value.code == "provider_error"
         assert exc.value.retryable is True
 
+    def test_empty_unexpected_exception_message_gets_diagnostic_fallback(self):
+        adapter = TranscriptAdapter()
+        api = stub_api(side_effect=RuntimeError(""))
+        with mock_import(adapter, api, no_errors()):
+            with pytest.raises(AdapterError) as exc:
+                adapter.get_transcript("vid", ["en"])
+        assert exc.value.code == "provider_error"
+        assert exc.value.message == "Provider returned an empty error message"
+
+    def test_429_message_becomes_request_blocked(self):
+        adapter = TranscriptAdapter()
+        api = stub_api(side_effect=RuntimeError("429 Client Error: Too Many Requests for url"))
+        with mock_import(adapter, api, no_errors()):
+            with pytest.raises(AdapterError) as exc:
+                adapter.get_transcript("vid", ["en"])
+        assert exc.value.code == "request_blocked"
+        assert exc.value.retryable is True
+
+    def test_future_live_event_message_becomes_video_unavailable(self):
+        adapter = TranscriptAdapter()
+        api = stub_api(side_effect=RuntimeError("The video is unplayable: This live event will begin in 6 days."))
+        with mock_import(adapter, api, no_errors()):
+            with pytest.raises(AdapterError) as exc:
+                adapter.get_transcript("vid", ["en"])
+        assert exc.value.code == "video_unavailable"
+        assert exc.value.retryable is False
+
     def test_dependency_error_is_non_retryable(self):
         adapter = TranscriptAdapter()
         with patch.object(adapter, "_import_dependencies",

@@ -70,18 +70,26 @@ class TranscriptAdapter:
         }
 
     def _classify_list_error(self, exc: Exception, errors: dict[str, type]) -> None:
+        message = _safe_message(str(exc))
         if _is_instance(exc, errors.get("TranscriptsDisabled")):
             raise AdapterError("transcripts_disabled", "Transcripts are disabled for this video")
         if _is_instance(exc, errors.get("VideoUnavailable")):
             raise AdapterError("video_unavailable", "Video is unavailable")
+        if _message_indicates_video_unavailable(message):
+            raise AdapterError("video_unavailable", message)
         if _is_instance(exc, errors.get("RequestBlocked")):
             raise AdapterError("request_blocked", "YouTube blocked the request")
-        raise AdapterError("provider_error", _safe_message(str(exc)))
+        if _message_indicates_request_blocked(message):
+            raise AdapterError("request_blocked", message)
+        raise AdapterError("provider_error", message)
 
     def _classify_fetch_error(self, exc: Exception, errors: dict[str, type]) -> None:
+        message = _safe_message(str(exc))
         if _is_instance(exc, errors.get("RequestBlocked")):
             raise AdapterError("request_blocked", "YouTube blocked the fetch request")
-        raise AdapterError("provider_error", _safe_message(str(exc)))
+        if _message_indicates_request_blocked(message):
+            raise AdapterError("request_blocked", message)
+        raise AdapterError("provider_error", message)
 
     def _select_transcript(self, transcript_list: Any, preferred_languages: list[str]) -> Any | None:
         by_code: dict[str, dict[str, Any]] = {}
@@ -198,9 +206,21 @@ def _validate_request(request: Any) -> str | None:
 # ---------------------------------------------------------------------------
 
 def _safe_message(msg: str) -> str:
+    if not msg.strip():
+        return "Provider returned an empty error message"
     if len(msg) > MAX_MESSAGE_LEN:
         return msg[:MAX_MESSAGE_LEN] + "..."
     return msg
+
+
+def _message_indicates_request_blocked(message: str) -> bool:
+    lowered = message.lower()
+    return "429" in lowered or "too many requests" in lowered
+
+
+def _message_indicates_video_unavailable(message: str) -> bool:
+    lowered = message.lower()
+    return "live event will begin" in lowered or "the video is unplayable" in lowered
 
 
 def _write_response(response: dict[str, Any]) -> None:

@@ -297,7 +297,9 @@ export class PythonTranscriptProvider implements TranscriptProvider {
       )
     }
 
-    const message = typeof response.message === 'string' ? response.message : errorCode
+    const message = typeof response.message === 'string' && response.message.trim()
+      ? response.message
+      : errorCode
 
     if (UNAVAILABLE_CODES.has(errorCode)) {
       return { status: 'unavailable', reason: errorCode as UnavailableReason }
